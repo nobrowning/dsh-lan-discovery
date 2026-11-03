@@ -41,7 +41,13 @@ jobs:
       - name: Pack and verify clean offline installation
         shell: pwsh
         run: |
-          if ($IsWindows) { $env:PATH = "$env:SystemRoot\System32;$env:PATH" }
+          if ($IsWindows) {
+            $env:PATH = "$env:SystemRoot\System32;$env:PATH"
+            $canonicalTemp = node -p 'require("node:fs").realpathSync(require("node:os").tmpdir())'
+            if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the Windows temporary directory.' }
+            $env:TEMP = $canonicalTemp
+            $env:TMP = $canonicalTemp
+          }
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           npm pack --pack-destination dist
           if ($LASTEXITCODE -ne 0) { throw 'npm pack failed.' }
