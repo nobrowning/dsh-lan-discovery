@@ -43,10 +43,11 @@ jobs:
         run: |
           if ($IsWindows) {
             $env:PATH = "$env:SystemRoot\System32;$env:PATH"
-            $canonicalTemp = node -p 'require("node:fs").realpathSync(require("node:os").tmpdir())'
+            $canonicalTemp = node -p 'require("node:fs").realpathSync.native(require("node:os").tmpdir())'
             if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the Windows temporary directory.' }
             $env:TEMP = $canonicalTemp
             $env:TMP = $canonicalTemp
+            Write-Host "Package verification temp: $canonicalTemp"
           }
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           npm pack --pack-destination dist
