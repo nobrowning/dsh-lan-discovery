@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { access, mkdir, mkdtemp, readFile, realpath, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -33,5 +34,6 @@ test('the actual package verifies through an aliased temporary directory', async
   assert.match(result, /"offlineInstallWithEmptyCache": true/);
   assert.match(result, /"hostImports": "passed"/);
   assert.match(result, /"browserBundle": "passed"/);
-  assert.match(await readFile(join(directory, 'SHA256SUMS'), 'utf8'), /^[a-f0-9]{64}  dsh-lan-discovery-[0-9.]+\.tgz\n$/);
+  const sha256 = createHash('sha256').update(await readFile(archive)).digest('hex');
+  assert.equal(await readFile(join(directory, 'SHA256SUMS'), 'utf8'), `${sha256}  ${pkg.name}-${pkg.version}.tgz\n`);
 });
