@@ -1,0 +1,67 @@
+{
+  "name": "dsh-lan-discovery",
+  "version": "0.3.1",
+  "description": "Discover and connect local LLM APIs inside DeepSeek Harness Desktop.",
+  "type": "module",
+  "main": "index.mjs",
+  "exports": {
+    ".": "./index.mjs",
+    "./client": "./client.js",
+    "./package.json": "./package.json",
+    "./trust": "./trust.mjs",
+    "./responses": "./responses.mjs",
+    "./controller": "./controller.mjs"
+  },
+  "files": [
+    "*.mjs",
+    "client.js",
+    "src/client.js",
+    "locale/*.json",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "docs",
+    "schemas"
+  ],
+  "scripts": {
+    "build": "node build-client.mjs && node verify.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "engines": {
+    "node": ">=24",
+    "dsh": "0.2.1-rc.3 || 0.2.1-rc.5"
+  },
+  "dependencies": {
+    "@llm-discovery/discovery-core": "file:vendor/llm-discovery-discovery-core-0.3.0.tgz"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-llm": "0.2.1-rc.3 || 0.2.1-rc.5",
+    "@deepseek-ai/dsh-tools": "0.2.1-rc.3 || 0.2.1-rc.5"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/dsh-llm": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-tools": {
+      "optional": true
+    }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "platform": "web"
+    }
+  },
+  "license": "MIT",
+  "bundleDependencies": [
+    "@llm-discovery/discovery-core"
+  ]
+}

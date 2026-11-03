@@ -1,0 +1,33 @@
+name: Build, test, and pack
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+      - run: npm pack
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dsh-lan-discovery-${{ matrix.os }}
+          path: dsh-lan-discovery-*.tgz
+          if-no-files-found: error
+          retention-days: 14
