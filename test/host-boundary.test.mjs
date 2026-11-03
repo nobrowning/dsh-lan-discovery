@@ -3,10 +3,30 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import { readFile } from 'node:fs/promises';
 import { createFetchHandler, registerControlRoutes } from '../index.mjs';
+import { DiscoveryController } from '../controller.mjs';
 
 function request(path, method = 'GET', body) {
   return new Request(`http://host/api/lan-discovery/${path}`, { method, headers: { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
 }
+
+test('transport warnings reach authenticated UI state with their cause, without extra metadata', async t => {
+  let emit;
+  const discovery = { subscribe(listener) { emit = listener; return () => {}; }, snapshot() { return []; }, async stop() {} };
+  const controller = new DiscoveryController({ discovery });
+  t.after(() => controller.close());
+  const failure = 'send EHOSTUNREACH 224.0.0.251:5353';
+  emit({ type: 'warning', error: failure, extra: 'not-part-of-the-public-event' });
+  const response = await createFetchHandler(controller)(request('state'));
+  const state = await response.json();
+  assert.equal(state.events[0].type, 'warning');
+  assert.equal(state.events[0].reason, failure);
+  assert.equal(JSON.stringify(state).includes('not-part-of-the-public-event'), false);
+  emit({ type: 'error', error: 'EACCES\n' + 'x'.repeat(1000) });
+  assert.equal(controller.snapshot().events[0].reason.length, 512);
+  assert.equal(controller.snapshot().events[0].reason.includes('\n'), false);
+  emit({ type: 'removed', reason: 'records-withdrawn-or-expired' });
+  assert.equal(controller.snapshot().events[0].reason, 'records-withdrawn-or-expired');
+});
 
 test('control routes fail closed without the native authenticated exact-route registry', () => {
   assert.throws(() => registerControlRoutes({}, {}), /authenticated Fetch-route registry/);

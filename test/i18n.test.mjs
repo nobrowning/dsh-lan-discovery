@@ -100,6 +100,16 @@ function submitKey(page) {
 
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
 
+test('discovery warning causes remain visible in the actual English and Chinese page bundle', async () => {
+  const page = await mountedPage();
+  const reason = 'send EHOSTUNREACH 224.0.0.251:5353';
+  page.states[0].events = [{ at: '2026-11-03', type: 'warning', reason }];
+  assert.ok(visibleText(page.render()).includes(reason));
+  page.switchLanguage('zh');
+  assert.ok(visibleText(page.render()).includes(reason));
+  page.dispose();
+});
+
 test('service list initially exposes information only; selecting a service does not connect or send a key', async () => {
   const calls = [];
   const page = await mountedPage({ auth: 'required', credential: { required: true, configured: false, source: null }, fetch: async path => { calls.push(path); return json(page.states[0]); } });

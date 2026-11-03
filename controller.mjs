@@ -6,6 +6,12 @@ import { ResponsesAdapter, modelDisplayName } from './responses.mjs';
 
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 const selection = value => ({ provider: value.provider, model: value.model, ...(value.reasoningEffort === undefined ? {} : { reasoningEffort: value.reasoningEffort }) });
+const discoveryReason = event => {
+  // Discovery-core puts socket failures in `error`, while removals use `reason`.
+  // Keep the failure visible without copying arbitrary transport metadata.
+  const value = typeof event.reason === 'string' ? event.reason : ['warning', 'error'].includes(event.type) && typeof event.error === 'string' ? event.error : undefined;
+  return value?.replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 512);
+};
 
 export function harnessDefaults(settings, namespace = 'agent-default-model') {
   return {
@@ -56,7 +62,7 @@ export class DiscoveryController {
     this.discovery = discovery; this.config = config; this.llm = llm; this.defaults = defaults; this.attribution = attribution; this.readImage = readImage; this.onRequestDiagnostics = onRequestDiagnostics; this.transportFactory = transportFactory;
     this.credentialStore = credentialStore; this.credentialStorageError = null;
     this.routes = new Map(); this.details = new Map(); this.events = []; this.lastRequestDiagnostics = null; this.running = false; this.error = null; this.recoveryError = null; this.recoveryPending = false; this.closed = false; this.tail = Promise.resolve(); this.state = { schema: 'dsh-lan-discovery-state/v1', baseline: null, lastWritten: null }; this.abort = new AbortController();
-    this.unsub = discovery.subscribe(event => { this.events.unshift({ at: new Date().toISOString(), type: event.type, instanceName: event.candidate?.instanceName, reason: event.reason }); this.events.length = Math.min(this.events.length, 80); if (event.candidate?.id) this.details.delete(event.candidate.id); });
+    this.unsub = discovery.subscribe(event => { this.events.unshift({ at: new Date().toISOString(), type: event.type, instanceName: event.candidate?.instanceName, reason: discoveryReason(event) }); this.events.length = Math.min(this.events.length, 80); if (event.candidate?.id) this.details.delete(event.candidate.id); });
   }
   serial(fn) { const task = this.tail.then(fn); this.tail = task.catch(() => {}); return task; }
   get stateFile() { return this.config.stateFile ? resolve(this.config.stateFile) : this.config.trustFile ? resolve(dirname(this.config.trustFile), 'plugin-state.json') : undefined; }
