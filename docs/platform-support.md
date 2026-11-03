@@ -2,17 +2,17 @@
 
 Updated 2026-11-03. This record distinguishes portable package checks from an installed Harness connecting to real LAN services. The plugin downloads no model weights and contains no native addon or platform executable; Node.js and Harness themselves must support the target OS and architecture.
 
-## Evidence before the 0.5.1 cross-platform release
+## Recorded package and Host evidence
 
 | Target | Package evidence | Live Host and network evidence |
 |---|---|---|
-| Windows x64 | 0.5.0 build, 48 tests, and empty-cache offline tarball installation passed in CI and locally. | rc.3/rc.5 Desktop acceptance is recorded in the Demo verification report. |
-| Linux x64 | 0.5.0 build, 48 tests, and empty-cache offline tarball installation passed in CI. | Official CLI/Web integration with this plugin has not been accepted. |
-| Linux arm64 | 0.5.1 CI target added; no completed result recorded here yet. | Not accepted. |
-| macOS Apple Silicon | 0.5.1 CI target added; no completed result recorded here yet. | Not accepted. |
-| macOS Intel | 0.5.1 CI target added; no completed result recorded here yet. | Not accepted. |
+| Windows x64 | 0.5.1 build, 49 tests, and empty-cache offline tarball installation passed locally and in CI. | Historical rc.3/rc.5 Desktop acceptance is recorded in the Demo verification report. |
+| Linux x64 | 0.5.1 build, 49 tests, and empty-cache offline tarball installation passed in CI and Ubuntu WSL2. | Official CLI/Web integration with this plugin has not been accepted. |
+| Linux arm64 | 0.5.1 build, 49 tests, and empty-cache offline tarball installation passed in CI. | Not accepted. |
+| macOS Apple Silicon | 0.5.1 build, 49 tests, and empty-cache offline tarball installation passed in CI and on a separate physical Mac. | Desktop integration has not been accepted. |
+| macOS Intel | 0.5.1 build, 49 tests, and empty-cache offline tarball installation passed in CI. | Desktop integration has not been accepted. |
 
-The historical package run is [41605361694](https://github.com/nobrowning/dsh-lan-discovery/actions/runs/41605361694). The Demo [validation report](https://github.com/nobrowning/llm-service-discovery-demo/blob/main/docs/validation-report.md) records which native interactions were executed, with versions and limits. Old evidence is not counted as a new 0.5.1 acceptance run.
+All five 0.5.1 targets passed [CI run 41654575829](https://github.com/nobrowning/dsh-lan-discovery/actions/runs/41654575829) at code revision `ce4a85e37265b4f7f7772a6e386260068aea1139`. The subsequent support-record update changes documentation only. The Demo [validation report](https://github.com/nobrowning/llm-service-discovery-demo/blob/main/docs/validation-report.md) records which native interactions were executed, with versions and limits. Old Desktop evidence is not counted as a new 0.5.1 acceptance run.
 
 ## 0.5.1 verification scope
 
@@ -20,7 +20,9 @@ Both workflows now declare five targets: Windows x64, Linux x64 and arm64, macOS
 
 The Release attaches one Linux x64-produced archive for all targets. Other CI archives are diagnostic build outputs, not separate architecture-specific plugins. npm can preserve different executable mode bits for a bundled dependency when packing on Windows; matching source contents need not yield identical archive hashes across builders. Consumers verify the published archive against its own `SHA256SUMS`.
 
-The configured 0.5.1 matrix is not yet a claim that its jobs passed. Record CI links, tested architecture, and live acceptance separately when they complete.
+The five-platform CI result qualifies the portable package checks, not five installed Harness sessions. The code has additionally been checked on a physical Apple Silicon Mac (`darwin/arm64`, Darwin 27.2.0) and Ubuntu WSL2 (`linux/x64`, kernel 6.18.40.1-microsoft-standard-WSL2), both with Node.js 24.22.2. Each received clean Git source archives and component tarballs in a dedicated validation directory. Both passed dependency installation, all 49 plugin tests, bundle construction, verification of the supplied archive, and empty-cache offline installation of the locally rebuilt archive. No Harness application was installed and no live LAN service was started for these component checks.
+
+The same runs also passed discovery-core 0.3.1's 14 tests and advertiser 0.3.1's 20 tests, plus installed-package checks. Mac arm64 and Linux x64 rebuilt the same bytes for all three component archives. These component results do not establish actual multicast reachability, Desktop UI behavior, or Linux Web Host compatibility.
 
 The local Windows x64 check with Node.js 24.21.0 passed the build and all **49 tests**, including the new package verification through an aliased temporary directory and the Git GNU tar path. This is package-level evidence, not a new native Desktop acceptance run.
 
