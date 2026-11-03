@@ -11,20 +11,20 @@ This repository contains the client plugin only. It does not start model servers
 - Services announce `_llm-api._tcp.local` and implement the supported **Open Responses subset plus this project's experimental capability metadata endpoint**. Announcement alone does not make an arbitrary existing LLM server compatible; adapt the server or place a compatible API adapter in front of it.
 - Discovery requires mDNS multicast reachability on the selected local network. Inference uses direct HTTPS from the Harness Host to the chosen API.
 
-The same `.tgz` contains portable JavaScript for every target; it includes no OS-specific executable or model weights. Package verification and real Harness acceptance are different checks. Windows Desktop has historical live acceptance; macOS Desktop and Linux Web integration require their own acceptance. The [platform support record](docs/platform-support.md) lists the exact evidence and pending checks. Linux is not an official Harness Desktop release target; use the separately documented Web Host evaluation route below.
+The same `.tgz` contains portable JavaScript for every target; it includes no OS-specific executable or model weights. Package verification and real Harness acceptance are different checks. Windows Desktop has historical live acceptance. On macOS Apple Silicon, the 0.5.2 candidate has passed real rc.5 Desktop installation, discovery, text, image, native tool, language, credential persistence, and cold-start default-model recovery checks. The [platform support record](docs/platform-support.md) lists the exact evidence and reload limitations. Linux is not an official Harness Desktop release target; its Web Host integration remains an evaluation route below.
 
 The discovery fields follow the experimental [IETF draft](https://datatracker.ietf.org/doc/draft-cui-dawn-local-llm-api-discovery/). The application metadata and local trust documents are project extensions, not standardized draft fields. Read the [service contract](docs/service-contract.md) before integrating a server.
 
 ## Download and install
 
-Download `dsh-lan-discovery-0.5.1.tgz` and `SHA256SUMS` from the [GitHub Release](https://github.com/nobrowning/dsh-lan-discovery/releases/tag/v0.5.1). Choose the `.tgz` attachment, not GitHub's automatically generated source archive. The plugin contains its built browser UI, discovery core, and runtime dependencies; you do not need to clone or build this repository or install the core separately.
+Download `dsh-lan-discovery-0.5.2.tgz` and `SHA256SUMS` from the [GitHub Release](https://github.com/nobrowning/dsh-lan-discovery/releases/tag/v0.5.2). Choose the `.tgz` attachment, not GitHub's automatically generated source archive. The plugin contains its built browser UI, discovery core, and runtime dependencies; you do not need to clone or build this repository or install the core separately.
 
 ### Windows Desktop
 
 Check the download against the matching line in `SHA256SUMS`:
 
 ```powershell
-Get-FileHash ./dsh-lan-discovery-0.5.1.tgz -Algorithm SHA256
+Get-FileHash ./dsh-lan-discovery-0.5.2.tgz -Algorithm SHA256
 ```
 
 Install a compatible DeepSeek Harness Desktop first, launch it once to initialize its profile, then fully quit it. Use that installation's bundled CLI, replacing the example application path. Check that the bundled Harness version is **0.2.1-rc.3 or 0.2.1-rc.5**:
@@ -32,21 +32,23 @@ Install a compatible DeepSeek Harness Desktop first, launch it once to initializ
 ```powershell
 $dsh = 'C:/path/to/DeepseekHarness/resources/runtime/cli/bin/dsh.cmd'
 & $dsh --version
-& $dsh plugin --profile desktop add (Resolve-Path './dsh-lan-discovery-0.5.1.tgz').Path
+& $dsh plugin --profile desktop add (Resolve-Path './dsh-lan-discovery-0.5.2.tgz').Path
 ```
 
 ### macOS Desktop
 
-macOS uses the application's shell launcher, without the `.cmd` suffix. The official Desktop packaging targets include Intel and Apple Silicon; this does not by itself qualify this plugin on either architecture. Use an application with the same supported bundled Harness version and consult the [acceptance record](docs/platform-support.md). Launch Desktop once, fully quit it, then replace the example app path if necessary:
+macOS uses the application's shell launcher, without the `.cmd` suffix. The current live checks used rc.5 on Apple Silicon; Intel has package CI evidence but no live Desktop acceptance. Consult the [acceptance record](docs/platform-support.md) and the [Mac Desktop quickstart](https://github.com/nobrowning/llm-service-discovery-demo/blob/main/docs/mac-desktop-quickstart.md) for native Demo services, profile configuration, and repeatable UI checks. Launch Desktop once to initialize its profile, fully quit it with **Quit / Command-Q**, then replace the example app path if necessary:
 
 ```sh
 shasum -a 256 -c SHA256SUMS
 dsh='/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh'
 "$dsh" --version
-"$dsh" plugin --profile desktop add "$PWD/dsh-lan-discovery-0.5.1.tgz"
+"$dsh" plugin --profile desktop add "$PWD/dsh-lan-discovery-0.5.2.tgz"
 ```
 
 The [official Desktop CLI contract](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/desktop/README.md#bundled-command-runtime) describes the bundled launcher and Desktop profile initialization. Do not use an unrelated npm `dsh` installation to manage the Desktop profile.
+
+If discovery fails, inspect the plugin's event record for the underlying error, such as `EHOSTUNREACH`. Version 0.5.2 preserves warning/error causes that previously appeared blank. Check **System Settings → Privacy & Security → Local Network → DeepSeek Harness** and allow the application when prompted. In the recorded Mac run, enabling this permission resolved `EHOSTUNREACH`; other failures can still come from the selected interface, VPN, firewall, or multicast routing. Terminal/SSH command-line tools can access the local network automatically, so a successful CLI probe does not establish the Desktop application's permission. See [Apple TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy).
 
 ### Linux Web Host evaluation
 
@@ -60,10 +62,10 @@ export DSH_HOME="$HOME/.local/share/llm-discovery-harness"
 npx --yes @deepseek-ai/dsh@0.2.1-rc.5 --version
 npx --yes @deepseek-ai/dsh@0.2.1-rc.5 plugin --help
 npx --yes @deepseek-ai/dsh@0.2.1-rc.5 web --help
-npx --yes @deepseek-ai/dsh@0.2.1-rc.5 plugin --profile web add "$PWD/dsh-lan-discovery-0.5.1.tgz"
+npx --yes @deepseek-ai/dsh@0.2.1-rc.5 plugin --profile web add "$PWD/dsh-lan-discovery-0.5.2.tgz"
 ```
 
-Configure the existing `lan-discovery` entry in this home's `profiles/web/cordis.patch.yml` using the example below, then launch:
+Merge the `lan-discovery` configuration into this home's `profiles/web/cordis.patch.yml` using the example below, then launch:
 
 ```sh
 npx --yes @deepseek-ai/dsh@0.2.1-rc.5 web --no-open
@@ -100,7 +102,7 @@ A linked installation needs this checkout and its `node_modules` to remain avail
 
 ## Configure and connect
 
-Provision a local trust document independently from discovery; the server operator supplies its endpoint, authorized IPs, CA, certificate fingerprint, and authentication policy. If the service requires an API key, obtain one separately and enter it in the plugin. In the Desktop profile's existing `lan-discovery` entry, set:
+Provision a local trust document independently from discovery; the server operator supplies its endpoint, authorized IPs, CA, certificate fingerprint, and authentication policy. If the service requires an API key, obtain one separately and enter it in the plugin. In the active Host home's `profiles/desktop/cordis.patch.yml` (or `profiles/web/cordis.patch.yml` for Web), merge the following configuration. Update an existing `lan-discovery` entry, or append this override if the profile has no such entry:
 
 ```yaml
 - id: lan-discovery
@@ -113,7 +115,7 @@ Provision a local trust document independently from discovery; the server operat
     demoMode: false
 ```
 
-Use the Host's actual LAN IPv4 address. Keep the existing entry's other fields and other profile entries. On macOS or Linux, replace the Windows path with an absolute POSIX path such as `/Users/alice/llm-discovery/trust.json` or `/home/alice/llm-discovery/trust.json`. YAML strings are not shell-expanded: `~` and `$HOME` remain literal characters. `DSH_LAN_DISCOVERY_TRUST_FILE` is an alternative to `trustFile`; a shell may expand `$HOME` when setting that environment variable before starting a CLI Host.
+Use the Host's actual LAN IPv4 address. Keep the existing entry's other fields, other plugins, and model configuration; do not replace the entire profile or add a duplicate override. The default Host home is `~/.dsh`; use the actual configured home or `DSH_HOME` if it differs. On macOS or Linux, replace the Windows path with an absolute POSIX path such as `/Users/alice/llm-discovery/trust.json` or `/home/alice/llm-discovery/trust.json`. YAML strings are not shell-expanded: `~` and `$HOME` remain literal characters. `DSH_LAN_DISCOVERY_TRUST_FILE` is an alternative to `trustFile`; a shell may expand `$HOME` when setting that environment variable before starting a CLI Host.
 
 `stateFile` optionally changes the recovery-journal location; by default it is `plugin-state.json` beside the trust document. The Host must be able to create and replace files in that directory. If trust is provisioned in a read-only directory such as `/etc/llm-discovery`, set `stateFile` to a writable user location, for example `/home/alice/.local/state/llm-discovery/plugin-state.json`. Do not solve a journal permission error by running the whole Harness as root.
 
@@ -184,7 +186,7 @@ To reproduce the package checks locally after building and testing:
 
 ```sh
 npm pack --pack-destination dist
-npm run verify:release -- dist/dsh-lan-discovery-0.5.1.tgz
+npm run verify:release -- dist/dsh-lan-discovery-0.5.2.tgz
 ```
 
 Create `dist` before running `npm pack`. The verification command writes `SHA256SUMS` beside the archive and removes only its own temporary installation directory when finished.

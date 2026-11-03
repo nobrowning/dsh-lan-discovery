@@ -71,6 +71,8 @@ export function scheduleDefaultRecovery(controller, loaderSettled, logger) {
   let cancelled = false;
   // Deliberately not awaited by apply(). Official SettingsForms uses the same
   // post-Loader pattern for writes that themselves reconcile the Loader.
+  // Loader settlement does not exit rc.5's inherited HMR transaction context.
+  // A rejected hot-reload recovery stays journaled for an explicit Disconnect.
   const completion = Promise.resolve(loaderSettled).then(async () => {
     if (!cancelled && !controller.closed && controller.recoveryPending) await controller.recoverDefault();
   }).catch(error => { logger?.warn?.(`lan-discovery: ${error.message}`); });
