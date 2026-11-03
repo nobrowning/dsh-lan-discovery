@@ -1,6 +1,6 @@
 {
   "name": "dsh-lan-discovery",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "description": "Discover and connect local LLM APIs inside DeepSeek Harness Desktop.",
   "type": "module",
   "main": "index.mjs",

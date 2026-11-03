@@ -67,6 +67,10 @@
   "auth.required": "需要 API key",
   "auth.file": "API key 已配置 · 凭据文件",
   "auth.session": "API key 已验证 · 本次运行",
+  "auth.saved": "API key 已保存 · 可直接连接",
+  "auth.remember": "记住此 API key",
+  "auth.savedHint": "保存在本机 Harness 中，重启 Harness 后仍可使用。",
+  "auth.storageUnavailable": "Harness 凭据存储暂不可用，可仅在本次运行中使用 key。",
   "auth.change": "更换 API key",
   "auth.clear": "清除 API key",
   "auth.cancel": "取消更换",
@@ -76,5 +80,7 @@
   "auth.verifyConnect": "验证并连接",
   "error.apiKeyRequired": "请为该服务输入 API key，然后验证并连接。",
   "error.apiKeyRejected": "服务拒绝了该 API key，请输入新的 key 后重试。",
-  "error.apiKeyInvalid": "请输入有效的 API key：1–4096 个可见 ASCII 字符，不含空格。"
+  "error.apiKeyInvalid": "请输入有效的 API key：1–4096 个可见 ASCII 字符，不含空格。",
+  "error.credentialStoreUnavailable": "Harness 凭据存储暂不可用。可仅在本次运行中使用 key，或稍后重试。",
+  "error.credentialStoreFailed": "无法读取或更新已保存的 API key。请重试，或仅在本次运行中使用 key。"
 }

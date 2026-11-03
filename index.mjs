@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { createDiscoveryClient } from '@llm-discovery/discovery-core';
 import { DiscoveryController, harnessDefaults } from './controller.mjs';
 import { loadTrust, validateApiKey } from './trust.mjs';
+import { createHarnessCredentialStore } from './credentials.mjs';
 
 export const name = 'lan-discovery';
 export const inject = ['connection', 'llm', 'settings'];
@@ -23,10 +24,11 @@ async function readBody(request) {
 
 function validateControlBody(path, body) {
   const action = path.slice('/api/lan-discovery/'.length);
-  const fields = action === 'connect' ? ['candidateId', 'modelId'] : action === 'credential' ? ['candidateId', 'apiKey'] : ['inspect', 'forget-credential'].includes(action) ? ['candidateId'] : [];
+  const fields = action === 'connect' ? ['candidateId', 'modelId'] : action === 'credential' ? ['candidateId', 'apiKey', 'remember'] : ['inspect', 'forget-credential'].includes(action) ? ['candidateId'] : [];
   if (Object.keys(body).some(key => !fields.includes(key))) throw new Error('Unknown control request field.');
   if (['connect', 'inspect', 'credential', 'forget-credential'].includes(action) && (typeof body.candidateId !== 'string' || !body.candidateId.trim() || body.candidateId.length > 1024)) throw new Error('A nonempty candidateId is required.');
   if (action === 'credential') validateApiKey(body.apiKey);
+  if (Object.hasOwn(body, 'remember') && typeof body.remember !== 'boolean') throw new Error('remember must be a boolean.');
   if (Object.hasOwn(body, 'modelId') && (typeof body.modelId !== 'string' || !body.modelId.trim() || body.modelId.length > 1024)) throw new Error('modelId must be a nonempty string when provided.');
 }
 
@@ -45,13 +47,13 @@ export function createFetchHandler(controller) {
       if (path === '/api/lan-discovery/start') result = await controller.start();
       else if (path === '/api/lan-discovery/stop') result = await controller.stop();
       else if (path === '/api/lan-discovery/inspect') result = await controller.inspect(body.candidateId);
-      else if (path === '/api/lan-discovery/credential') result = await controller.setCredential(body.candidateId, body.apiKey);
+      else if (path === '/api/lan-discovery/credential') result = await controller.setCredential(body.candidateId, body.apiKey, { remember: body.remember ?? false });
       else if (path === '/api/lan-discovery/forget-credential') result = await controller.forgetCredential(body.candidateId);
       else if (path === '/api/lan-discovery/connect') result = await controller.connect(body.candidateId, body.modelId);
       else if (path === '/api/lan-discovery/disconnect') result = await controller.disconnect();
       else return send(404, { error: 'Unknown operation.' });
       return send(200, result ?? { ok: true });
-    } catch (error) { return send(400, { error: error instanceof Error ? error.message : 'LAN operation failed.', ...(['API_KEY_REQUIRED', 'API_KEY_REJECTED', 'API_KEY_INVALID'].includes(error.code) ? { code: error.code } : {}) }); }
+    } catch (error) { return send(400, { error: error instanceof Error ? error.message : 'LAN operation failed.', ...(['API_KEY_REQUIRED', 'API_KEY_REJECTED', 'API_KEY_INVALID', 'CREDENTIAL_STORE_UNAVAILABLE', 'CREDENTIAL_STORE_FAILED'].includes(error.code) ? { code: error.code } : {}) }); }
   };
 }
 
@@ -79,7 +81,7 @@ export async function apply(ctx, supplied = {}) {
   const config = { ...supplied, trustFile: supplied.trustFile ?? process.env.DSH_LAN_DISCOVERY_TRUST_FILE };
   const { attributionHeaders } = await import('@deepseek-ai/dsh-llm');
   const discovery = createDiscoveryClient({ interfaceAddress: config.interfaceAddress, networkId: config.networkId, queryIntervalMs: config.queryIntervalMs });
-  const controller = new DiscoveryController({ discovery, config, llm: ctx.llm, defaults: harnessDefaults(ctx.settings), attribution: attributionHeaders(),
+  const controller = new DiscoveryController({ discovery, config, llm: ctx.llm, defaults: harnessDefaults(ctx.settings), attribution: attributionHeaders(), credentialStore: createHarnessCredentialStore(ctx.get('credentials')),
     onRequestDiagnostics(diagnostic) { ctx.logger?.info?.(`lan-discovery request ${JSON.stringify(diagnostic)}`); },
     async readImage(ref, signal) {
       const attachments = ctx.get('attachments');

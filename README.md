@@ -30,7 +30,7 @@ Fully quit Harness before installing or updating the plugin. Use the **Desktop i
 
 ```powershell
 $dsh = 'C:/path/to/DeepseekHarness/resources/runtime/cli/bin/dsh.cmd'
-& $dsh plugin --profile desktop add (Resolve-Path './dsh-lan-discovery-0.3.1.tgz').Path
+& $dsh plugin --profile desktop add (Resolve-Path './dsh-lan-discovery-0.4.0.tgz').Path
 ```
 
 For development, link this checkout instead of the tarball:
@@ -75,15 +75,25 @@ A normal trust document looks like:
 
 Paths resolve relative to this document. The sample fingerprint is a placeholder and must be replaced. Credentials and trust paths do not come from multicast announcements. A manually entered API key travels from the password field to the authenticated Harness Host; the Host never returns it in service state, and local trust-file paths do not enter the UI. The legacy `llm-discovery-demo-trust/v1` schema remains accepted.
 
-Open **LAN services**. A service marked **No API key required** can be inspected and connected directly. For **API key required**, enter the service's key and select **Verify and connect**. The field clears immediately on submission. The Host verifies the model list and `{base}/_llm/capabilities` before retaining a valid key and opening a normal Harness conversation. Rejected keys can be retried; a rejected replacement does not overwrite a previously valid key. The plugin does not create API keys, enroll accounts, or run an OAuth flow.
+Open **LAN services**. The service cards distinguish three common cases:
 
-Keys entered in the UI remain in Host memory for this Harness run only. They are not written to disk, logs, browser storage, or the recovery journal. **Disconnect and restore default** keeps these keys available for reconnecting; **Clear API key**, exiting Harness, or reloading/unloading the plugin clears them. Clearing a session key also disconnects that service. An optional `tokenFile` in a required-auth trust entry supplies a pre-provisioned key instead; the UI cannot delete that file, and clearing a session override restores the file fallback.
+| Status | What to do |
+|---|---|
+| **No API key required** | Inspect or connect directly. |
+| **API key saved · Ready to connect** | Connect directly, or change/clear the saved key. |
+| **API key required** | Enter the service's key and select **Verify and connect**. |
+
+**Remember this API key** is selected by default when the Harness credential provider is available. A successfully verified key is saved through the official Host `credentials` API and remains available after restarting Harness. Clear that checkbox to use the key in memory for this run only. The password field clears immediately on submission; a saved key is represented by its status, never copied back into the field. The Host verifies the model list and `{base}/_llm/capabilities` before retaining the key. A rejected replacement leaves the prior valid key intact. The plugin does not create API keys, enroll accounts, or run an OAuth flow.
+
+Saved keys use the active Harness credential provider under `lan-discovery/service-<identity>`. Storage protection is provided by Harness: the reviewed local provider persists records in profile YAML and does not provide OS-backed encryption. The plugin does not read or rewrite the credential file directly. It never includes keys in UI state, logs, browser storage, plugin configuration, or its recovery journal. If the provider is unavailable, the UI offers session-only use.
+
+**Disconnect and restore default** keeps keys available for reconnecting. **Clear API key** removes the saved/session key owned by this plugin and disconnects that service. Exiting Harness or reloading/unloading the plugin clears session-only keys; saved keys remain until cleared. Changing a saved key with **Remember** unchecked removes its saved copy after successful validation. An optional `tokenFile` in a required-auth trust entry supplies a pre-provisioned key instead; the UI cannot delete that file, and clearing a plugin-managed override restores the file fallback.
 
 Omitting `auth` in a trust entry means `required` for compatibility. An experimental key-free service needs `auth: "none"` in both its advertisement and independent local trust entry, with no `tokenFile`; the client sends no API key to it. This is an experiment extension: [draft-00 §5.3](https://datatracker.ietf.org/doc/draft-cui-dawn-local-llm-api-discovery/00/) requires `auth=required` for its Open Responses binding, so the key-free scenario does not conform to that binding.
 
 Existing conversations retain their previous model. **Disconnect and restore default** removes the plugin's temporary providers and restores the previous default if the user has not subsequently changed it. Disconnect before disabling or uninstalling the plugin.
 
-Every connection checks the exact authorized URL, discovered and allowed IP intersection, certificate chain, hostname, leaf fingerprint, and agreement between advertised and locally authorized authentication policy. The session key is bound to the endpoint, certificate, approved IP set, and authentication policy, not just a friendly service name. Redirects are rejected. This trust is scoped to the plugin; it does not modify system certificates, global DNS, global TLS behavior, or existing provider credentials.
+Every connection checks the exact authorized URL, discovered and allowed IP intersection, certificate chain, hostname, leaf fingerprint, and agreement between advertised and locally authorized authentication policy. Both saved and session keys are bound to the endpoint, certificate, approved IP set, and authentication policy, not just a friendly service name. A changed identity requires a new key verification. Redirects are rejected. This trust is scoped to the plugin; it does not modify system certificates, global DNS, global TLS behavior, or unrelated provider credentials.
 
 ## Language
 

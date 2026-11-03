@@ -4,7 +4,7 @@ window.__ModuleLoader__.load({ id: 'dsh-lan-discovery', factory: require => {
   const h = React.createElement;
   const NS = 'lan-discovery';
   /*__LAN_DICTIONARIES__*/
-  const CREDENTIAL_ERRORS = { API_KEY_REQUIRED: 'error.apiKeyRequired', API_KEY_REJECTED: 'error.apiKeyRejected', API_KEY_INVALID: 'error.apiKeyInvalid' };
+  const CREDENTIAL_ERRORS = { API_KEY_REQUIRED: 'error.apiKeyRequired', API_KEY_REJECTED: 'error.apiKeyRejected', API_KEY_INVALID: 'error.apiKeyInvalid', CREDENTIAL_STORE_UNAVAILABLE: 'error.credentialStoreUnavailable', CREDENTIAL_STORE_FAILED: 'error.credentialStoreFailed' };
   const HOST_ERRORS = {
     'Configure trustFile before connecting. Discovery does not grant trust.': 'error.trustRequired',
     'Configure trustFile before changing a provider.': 'error.configureProvider',
@@ -51,7 +51,8 @@ window.__ModuleLoader__.load({ id: 'dsh-lan-discovery', factory: require => {
   function App({ api, newSession, localeStore, t }) {
     React.useSyncExternalStore(localeStore.subscribe, localeStore.getSnapshot, localeStore.getSnapshot);
     const [state, setState] = React.useState(null); const [error, setError] = React.useState(''); const [busy, setBusy] = React.useState(''); const [filter, setFilter] = React.useState('all'); const [models, setModels] = React.useState({}); const [message, setMessage] = React.useState(null);
-    const [apiKeys, setApiKeys] = React.useState({}); const [editingKeys, setEditingKeys] = React.useState({});
+    const [apiKeys, setApiKeys] = React.useState({}); const [editingKeys, setEditingKeys] = React.useState({}); const [rememberKeys, setRememberKeys] = React.useState({});
+    const canSaveCredentials = state?.credentialStorage?.available === true;
     const refresh = React.useCallback(async () => { const value = await api('state'); setState(value); }, [api]);
     React.useEffect(() => { let live = true; const poll = () => api('state').then(value => { if (live) setState(value); }).catch(error => { if (live) setError(previous => previous || error); }); poll(); const timer = setInterval(poll, 2000); return () => { live = false; clearInterval(timer); }; }, [api]);
     const clearInput = id => setApiKeys(previous => { const next = { ...previous }; delete next[id]; return next; });
@@ -74,7 +75,7 @@ window.__ModuleLoader__.load({ id: 'dsh-lan-discovery', factory: require => {
       clearInput(candidateId); setBusy(candidateId); setError(''); setMessage(null);
       try {
         if (!/^[\x21-\x7e]{1,4096}$/.test(apiKey)) throw Object.assign(new Error('Invalid API key.'), { code: 'API_KEY_INVALID' });
-        await api('credential', { candidateId, apiKey });
+        await api('credential', { candidateId, apiKey, remember: canSaveCredentials && (rememberKeys[candidateId] ?? true) });
         setEditingKeys(previous => ({ ...previous, [candidateId]: false }));
         await refresh();
         const result = await api('connect', { candidateId, modelId });
@@ -87,7 +88,7 @@ window.__ModuleLoader__.load({ id: 'dsh-lan-discovery', factory: require => {
       } finally { setBusy(''); }
     }
     const candidates = (state?.candidates ?? []).filter(candidate => filter === 'all' || candidate.details?.models?.some(model => filter === 'image' ? model.input_modalities.includes('image') : model.function_calling === 'supported')).sort((left, right) => String(left.instanceName ?? left.id).localeCompare(String(right.instanceName ?? right.id)) || String(left.id).localeCompare(String(right.id)));
-    return h('div', { className: 'lan-page' }, h('style', null, css, '.lan-card h2{line-height:1.35;overflow-wrap:anywhere}.lan-specs{font-size:13px;line-height:1.6}.lan-machine{font-size:12px;margin:6px 0 10px}.lan-auth{margin-top:12px;font-size:12px;line-height:1.5}.lan-auth-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:4px}.lan-page button.lan-link{border:0;padding:0;font:inherit;text-decoration:underline;text-underline-offset:3px}.lan-key-form{display:flex;flex-direction:column;gap:8px;margin-top:8px}.lan-key-form input{box-sizing:border-box;width:100%;min-width:0;font:inherit;color:inherit;background:transparent;border:1px solid #8885;border-radius:8px;padding:9px 10px}.lan-key-form .primary{align-self:flex-start}.lan-key-note{margin:0;opacity:.65}'),
+    return h('div', { className: 'lan-page' }, h('style', null, css, '.lan-card h2{line-height:1.35;overflow-wrap:anywhere}.lan-specs{font-size:13px;line-height:1.6}.lan-machine{font-size:12px;margin:6px 0 10px}.lan-auth{margin-top:12px;font-size:12px;line-height:1.5}.lan-auth-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:4px}.lan-page button.lan-link{border:0;padding:0;font:inherit;text-decoration:underline;text-underline-offset:3px}.lan-key-form{display:flex;flex-direction:column;gap:8px;margin-top:8px}.lan-key-form input[type=password]{box-sizing:border-box;width:100%;min-width:0;font:inherit;color:inherit;background:transparent;border:1px solid #8885;border-radius:8px;padding:9px 10px}.lan-key-remember{display:flex;align-items:center;gap:7px;cursor:pointer}.lan-key-remember input{margin:0}.lan-key-form .primary{align-self:flex-start}.lan-key-note{margin:0;opacity:.65}'),
       h('div', { className: 'lan-head' }, h('div', null, h('h1', null, t('title')), h('p', { className: 'lan-muted' }, t('subtitle'))), h('span', { className: 'lan-badge' }, state === null ? t('status.connecting') : state.running ? t('status.discovering') : t('status.stopped'))),
       h('div', { className: 'lan-toolbar' }, h('button', { onClick: () => act(state?.running ? 'stop' : 'start'), disabled: !!busy }, state?.running ? t('action.stop') : t('action.start')), h('select', { value: filter, onChange: event => setFilter(event.target.value), 'aria-label': t('filter.label') }, h('option', { value: 'all' }, t('filter.all')), h('option', { value: 'image' }, t('filter.image')), h('option', { value: 'tools' }, t('filter.tools'))), h('button', { onClick: () => act('disconnect'), disabled: !!busy || (!state?.connections?.length && !state?.recovery?.pending) }, t('action.disconnect'))),
       (error || state?.error) && h('p', { className: 'lan-error', role: 'alert' }, errorText(error || state.error, t)), message && h('p', { role: 'status' }, t(message.key, message.params)),
@@ -99,18 +100,22 @@ window.__ModuleLoader__.load({ id: 'dsh-lan-discovery', factory: require => {
         const credential = candidate.credential; const keyRequired = credential?.required ?? candidate.auth !== 'none'; const keyConfigured = credential?.configured === true;
         const credentialError = details?.status === 'error' && Object.hasOwn(CREDENTIAL_ERRORS, details.code);
         const showKeyForm = keyRequired && (!keyConfigured || editingKeys[candidate.id] || (credentialError && editingKeys[candidate.id] !== false));
+        const rememberKey = canSaveCredentials && (rememberKeys[candidate.id] ?? true);
+        const retainedCredential = credential?.retainedSession === true || credential?.retainedSaved === true;
         const connectDisabled = !!busy || state?.recovery?.pending || !valid || !state.trustConfigured || (!!model && model.streaming !== 'supported');
         return h('article', { className: 'lan-card', key: candidate.id }, h('span', { className: 'lan-badge' }, details?.mock ? t('badge.mock') : t('badge.discovered')), connected && h('span', { className: 'lan-badge' }, t('badge.configured')), h('h2', null, title),
           specs && h('div', { className: 'lan-specs' }, [specs.parameters ? t('spec.parameters', { value: specs.parameters }) : null, specs.version ? t('spec.version', { value: specs.version }) : null, specs.quantization].filter(Boolean).join(' · ')),
           details?.nodeLabel && h('div', { className: 'lan-muted lan-machine' }, details.nodeLabel),
           model ? h('div', null, ...[model.input_modalities.includes('image') ? t('capability.image') : null, model.function_calling === 'supported' ? t('capability.tools') : null].filter(Boolean).map(label => h('span', { className: 'lan-tag', key: label }, label))) : h('p', { className: 'lan-muted' }, t('service.inspectHint')),
-          h('div', { className: 'lan-auth' }, h('span', { className: 'lan-muted' }, !keyRequired ? t('auth.none') : keyConfigured ? t(credential.source === 'file' ? 'auth.file' : 'auth.session') : t('auth.required')),
-            ((keyRequired && keyConfigured) || credential?.retainedSession === true) && h('div', { className: 'lan-auth-tools' },
+          h('div', { className: 'lan-auth' }, h('span', { className: 'lan-muted' }, !keyRequired ? t('auth.none') : keyConfigured ? t(credential.source === 'saved' ? 'auth.saved' : credential.source === 'file' ? 'auth.file' : 'auth.session') : t('auth.required')),
+            ((keyRequired && keyConfigured) || retainedCredential) && h('div', { className: 'lan-auth-tools' },
               keyRequired && keyConfigured && !showKeyForm && h('button', { className: 'lan-link', disabled: !!busy, onClick: () => setEditingKeys(previous => ({ ...previous, [candidate.id]: true })) }, t('auth.change')),
-              (credential.source === 'session' || credential.retainedSession === true) && h('button', { className: 'lan-link', disabled: !!busy, onClick: () => act('forget-credential', { candidateId: candidate.id }, candidate.id) }, t('auth.clear'))),
+              (credential.source === 'session' || credential.source === 'saved' || retainedCredential) && h('button', { className: 'lan-link', disabled: !!busy, onClick: () => act('forget-credential', { candidateId: candidate.id }, candidate.id) }, t('auth.clear'))),
             showKeyForm && h('form', { className: 'lan-key-form', onSubmit: event => { event.preventDefault(); if (!connectDisabled) return verifyAndConnect(candidate.id, selected); } },
               h('input', { type: 'password', value: apiKeys[candidate.id] ?? '', placeholder: t('auth.placeholder'), 'aria-label': t('auth.inputLabel', { service: title }), autoComplete: 'off', autoCapitalize: 'none', autoCorrect: 'off', spellCheck: false, maxLength: 4096, disabled: !!busy, onChange: event => { const value = event.target.value; setApiKeys(previous => ({ ...previous, [candidate.id]: value })); } }),
-              h('p', { className: 'lan-key-note' }, t('auth.sessionHint')),
+              canSaveCredentials && h('label', { className: 'lan-key-remember' }, h('input', { type: 'checkbox', checked: rememberKey, disabled: !!busy, onChange: event => { const checked = event.target.checked; setRememberKeys(previous => ({ ...previous, [candidate.id]: checked })); } }), t('auth.remember')),
+              h('p', { className: 'lan-key-note' }, t(rememberKey ? 'auth.savedHint' : 'auth.sessionHint')),
+              !canSaveCredentials && h('p', { className: 'lan-key-note' }, t('auth.storageUnavailable')),
               h('button', { className: 'primary', type: 'submit', disabled: connectDisabled || !(apiKeys[candidate.id] ?? '').length }, busy === candidate.id ? t('action.busy') : t('auth.verifyConnect')),
               keyConfigured && editingKeys[candidate.id] && h('button', { type: 'button', className: 'lan-link', disabled: !!busy, onClick: () => { clearInput(candidate.id); setEditingKeys(previous => ({ ...previous, [candidate.id]: false })); } }, t('auth.cancel')))),
           available.length > 1 && h('select', { 'aria-label': t('service.model'), value: selected, onChange: event => setModels(previous => ({ ...previous, [candidate.id]: event.target.value })) }, available.map(value => h('option', { key: value.id, value: value.id }, [value.display_name ?? value.id, value.deployment?.quantization].filter(Boolean).join(' · ')))),

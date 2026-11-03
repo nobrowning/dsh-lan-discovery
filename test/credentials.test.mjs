@@ -6,9 +6,10 @@ import { join, resolve, sep } from 'node:path';
 import { DiscoveryController } from '../controller.mjs';
 import { loadTrust, authorizeCandidate, credentialError, validateApiKey } from '../trust.mjs';
 import { createFetchHandler } from '../index.mjs';
+import { createHarnessCredentialStore } from '../credentials.mjs';
 
 const keys = { one: 'synthetic-key-one', two: 'synthetic-key-two', replacement: 'synthetic-replacement' };
-async function fixture(t) {
+async function fixture(t, provider) {
   const dir = await mkdtemp(join(tmpdir(), 'dsh-lan-credential-test-'));
   const trustFile = join(dir, 'trust.json');
   await writeFile(join(dir, 'ca.pem'), 'fixture-ca');
@@ -17,7 +18,8 @@ async function fixture(t) {
   await writeFile(trustFile, JSON.stringify(document));
   const candidates = services.map((service, i) => ({ id: ['one', 'two', 'free'][i], instanceName: `fixture-${i}`, baseURL: service.baseURL, auth: service.auth, apiProfile: 'openresponses', protocolVersion: '2026-04-24', addresses: ['127.0.0.1'], validation: { valid: true }, expiresAt: Date.now() + 60000 }));
   const seen = [], adapters = new Map(); let current = { value: { provider: 'original', model: 'original' }, revision: 1 };
-  const controller = new DiscoveryController({
+  const createController = () => new DiscoveryController({
+    credentialStore: createHarnessCredentialStore(provider),
     config: { trustFile, autoStart: false },
     discovery: { subscribe() { return () => {}; }, snapshot: () => candidates, async start() {}, async stop() {} },
     defaults: { read: () => structuredClone(current), async compareAndSet(expected, value) { assert.deepEqual(expected, current); current = { value, revision: current.revision + 1 }; return structuredClone(current); } },
@@ -27,7 +29,7 @@ async function fixture(t) {
       const request = async (relative) => {
         if (closed) throw new Error('closed');
         const id = new URL(binding.baseURL).pathname.slice(1);
-        const key = options.apiKey ?? options.getApiKey?.();
+        const key = options.apiKey ?? await options.getApiKey?.();
         seen.push({ id, authenticated: key !== undefined });
         if (binding.auth === 'none') assert.equal(key, undefined);
         else if (key !== keys[id] && !(id === 'one' && key === keys.replacement)) throw credentialError('API_KEY_REJECTED');
@@ -36,10 +38,64 @@ async function fixture(t) {
       return { json: request, close() { closed = true; } };
     },
   });
-  await controller.initialize();
+  let controller = createController(); await controller.initialize();
   t.after(async () => { await controller.close(); const target = resolve(dir); assert.ok(target.startsWith(resolve(tmpdir()) + sep) && target.includes('dsh-lan-credential-test-')); await rm(target, { recursive: true, force: true }); });
-  return { dir, controller, trustFile, document, candidates, seen, adapters, get current() { return current; }, selectProvider(provider, model = 'model') { current = { value: { provider, model }, revision: current.revision + 1 }; } };
+  return { dir, get controller() { return controller; }, trustFile, document, candidates, seen, adapters, async restart() { await controller.close(); controller = createController(); await controller.initialize(); }, get current() { return current; }, selectProvider(provider, model = 'model') { current = { value: { provider, model }, revision: current.revision + 1 }; } };
 }
+
+function memoryProvider() {
+  const records = new Map();
+  return { records, async listRecords() { return [...records].map(([key, record]) => ({ key, kind: record.kind })); }, async readRecord(key) { return structuredClone(records.get(key)); }, async modifyRecord(key, fn) { records.set(key, structuredClone(await fn(records.get(key)))); }, async deleteRecord(key) { records.delete(key); } };
+}
+
+test('saved keys restore after restart while the free and unconfigured states remain distinct', async t => {
+  const provider = memoryProvider(), f = await fixture(t, provider);
+  await f.controller.setCredential('one', keys.one, { remember: true });
+  await f.restart();
+  assert.deepEqual(f.controller.snapshot().candidates.map(candidate => candidate.credential.source), ['saved', null, null]);
+  assert.equal(f.controller.snapshot().credentialStorage.available, true);
+  assert.ok(!JSON.stringify(f.controller.snapshot()).includes(keys.one));
+  await f.controller.connect('one'); await f.controller.disconnect();
+  await assert.rejects(f.controller.connect('two'), { code: 'API_KEY_REQUIRED' });
+  await f.controller.connect('free'); await f.controller.disconnect();
+  await f.controller.forgetCredential('one'); await f.restart();
+  assert.equal(provider.records.size, 0);
+  await assert.rejects(f.controller.connect('one'), { code: 'API_KEY_REQUIRED' });
+});
+
+test('verified saved replacement is atomic and switching to session removes the durable copy', async t => {
+  const provider = memoryProvider(), f = await fixture(t, provider);
+  await f.controller.setCredential('one', keys.one, { remember: true });
+  await assert.rejects(f.controller.setCredential('one', 'wrong', { remember: true }), { code: 'API_KEY_REJECTED' });
+  await f.restart(); await f.controller.connect('one'); await f.controller.disconnect();
+  await f.controller.setCredential('one', keys.replacement, { remember: false });
+  assert.equal(provider.records.size, 0);
+  assert.equal(f.controller.snapshot().candidates[0].credential.source, 'session');
+  await f.restart();
+  await assert.rejects(f.controller.connect('one'), { code: 'API_KEY_REQUIRED' });
+});
+
+test('saved keys cannot follow an identity change and remain revocable after withdrawal', async t => {
+  const provider = memoryProvider(), f = await fixture(t, provider);
+  await f.controller.setCredential('one', keys.one, { remember: true }); await f.restart();
+  f.document.services[0].certificateSha256 = 'b'.repeat(64); await writeFile(f.trustFile, JSON.stringify(f.document));
+  await assert.rejects(f.controller.inspect('one'), { code: 'API_KEY_REQUIRED' });
+  assert.equal(f.controller.snapshot().candidates[0].credential.retainedSaved, true);
+  f.candidates.splice(0, 1); await f.controller.forgetCredential('one');
+  assert.equal(provider.records.size, 0);
+});
+
+test('storage errors never claim a key was saved or replace a prior working key', async t => {
+  const provider = memoryProvider(), f = await fixture(t, provider);
+  await f.controller.setCredential('one', keys.one);
+  provider.modifyRecord = async () => { throw new Error(keys.replacement); };
+  await assert.rejects(f.controller.setCredential('one', keys.replacement, { remember: true }), error => error.code === 'CREDENTIAL_STORE_FAILED' && !error.message.includes(keys.replacement));
+  assert.equal(f.controller.snapshot().candidates[0].credential.source, 'session');
+  await f.controller.connect('one'); await f.controller.disconnect();
+  const unavailable = await fixture(t);
+  await assert.rejects(unavailable.controller.setCredential('one', keys.one, { remember: true }), { code: 'CREDENTIAL_STORE_UNAVAILABLE' });
+  assert.equal(unavailable.seen.length, 0);
+});
 
 test('mixed services connect without a key or require successful explicit verification', async t => {
   const f = await fixture(t);
@@ -138,6 +194,7 @@ test('key routes validate bounded input and never echo malformed credential JSON
     const response = await handler(request('credential', { candidateId: 'one', apiKey }));
     assert.equal(response.status, 400); assert.equal((await response.json()).code, 'API_KEY_INVALID');
   }
+  for (const remember of ['true', 1, null, {}]) assert.equal((await handler(request('credential', { candidateId: 'one', apiKey: keys.one, remember }))).status, 400);
   const malformed = await handler(request('credential', `{"apiKey":"${keys.one}",`));
   assert.equal((await malformed.json()).error, 'Invalid JSON control request.');
   const rejected = await handler(request('credential', { candidateId: 'one', apiKey: 'wrong-key' }));

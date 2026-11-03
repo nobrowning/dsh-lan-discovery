@@ -67,6 +67,10 @@
   "auth.required": "API key required",
   "auth.file": "API key configured · Credential file",
   "auth.session": "API key verified · This Harness run",
+  "auth.saved": "API key saved · Ready to connect",
+  "auth.remember": "Remember this API key",
+  "auth.savedHint": "Saved in Harness on this computer and available after restarting Harness.",
+  "auth.storageUnavailable": "Harness credential storage is unavailable. You can use a key for this run only.",
   "auth.change": "Change API key",
   "auth.clear": "Clear API key",
   "auth.cancel": "Cancel change",
@@ -76,5 +80,7 @@
   "auth.verifyConnect": "Verify and connect",
   "error.apiKeyRequired": "Enter an API key for this service, then verify and connect.",
   "error.apiKeyRejected": "The service rejected the API key. Enter a new key and try again.",
-  "error.apiKeyInvalid": "Enter a valid API key: 1–4096 visible ASCII characters, without spaces."
+  "error.apiKeyInvalid": "Enter a valid API key: 1–4096 visible ASCII characters, without spaces.",
+  "error.credentialStoreUnavailable": "Harness credential storage is unavailable. Use a key for this run only, or retry later.",
+  "error.credentialStoreFailed": "The saved API key could not be read or updated. Retry, or use a key for this run only."
 }

@@ -10,9 +10,9 @@ const source = await readFile(new URL('client.js', pluginRoot), 'utf8');
 
 // Exercise the actual bundled page and sidebar contributions against the public
 // locale face. Harness owns OS-language matching and persisted preferences.
-async function mountedPage({ language = 'en', error = '', fetch, auth = 'none', credential = { required: false, configured: false, source: null } } = {}) {
+async function mountedPage({ language = 'en', error = '', fetch, auth = 'none', credential = { required: false, configured: false, source: null }, credentialStorage = { available: false } } = {}) {
   const service = { id: 'vision', auth, credential, instanceName: 'local-service._llm-api._tcp.local', baseURL: 'https://fixture.local/v1', validation: { valid: true }, details: { mock: true, nodeLabel: 'fixture.local', models: [{ id: 'wire-model', display_name: 'Qwen2.5-VL-7B-Instruct', deployment: { parameters: '7B', version: '2.5-VL', quantization: 'BF16' }, input_modalities: ['text', 'image'], streaming: 'supported', function_calling: 'unsupported' }] } };
-  const states = [{ running: true, trustConfigured: true, connections: [], candidates: [service], events: [{ at: '2026-11-02', type: 'added', instanceName: service.instanceName }] }, error, '', 'all', {}, null, {}, {}];
+  const states = [{ running: true, trustConfigured: true, credentialStorage, connections: [], candidates: [service], events: [{ at: '2026-11-02', type: 'added', instanceName: service.instanceName }] }, error, '', 'all', {}, null, {}, {}, {}];
   let stateIndex = 0; let definition; let localeSnapshot = { active: language, revision: 0 }; let dictionaries; let dictionaryCount = 0;
   const subscriptions = new Set(); const effects = []; const registrations = new Map(); const pollEffects = []; const intervals = new Set(); let sessionCount = 0;
   const react = {
@@ -180,7 +180,8 @@ test('password is cleared before validation settles; rejected keys can be retrie
   assert.equal(elements(page.render(), node => node.type === 'input').length, 0);
   assert.match(visibleText(page.render()), /API key 已验证 · 本次运行/);
   assert.equal(JSON.stringify(page.render()).includes('second-synthetic-key'), false);
-  assert.deepEqual(submitted.map(value => Object.keys(value).sort()), [['apiKey', 'candidateId'], ['apiKey', 'candidateId']]);
+  assert.deepEqual(submitted.map(value => Object.keys(value).sort()), [['apiKey', 'candidateId', 'remember'], ['apiKey', 'candidateId', 'remember']]);
+  assert.ok(submitted.every(value => value.remember === false));
   assert.ok(submitted.every(value => value.candidateId === 'vision'));
   page.dispose();
 });
@@ -247,5 +248,85 @@ test('an obsolete retained session key can be cleared without treating the new i
   await button(page, 'Clear API key').props.onClick();
   assert.deepEqual(calls, ['forget-credential', 'state']);
   assert.equal(elements(page.render(), node => node.type === 'button' && visibleText(node) === 'Clear API key').length, 0);
+  page.dispose();
+});
+
+test('remember defaults to Harness storage and can be switched to this run only', async () => {
+  let snapshot; const submissions = [];
+  const page = await mountedPage({ auth: 'required', credential: { required: true, configured: false, source: null }, credentialStorage: { available: true }, fetch: async (path, init) => {
+    const action = path.split('/').at(-1);
+    if (action === 'state') return json(snapshot);
+    if (action === 'credential') {
+      const body = JSON.parse(init.body); submissions.push(body);
+      snapshot.candidates[0].credential = { required: true, configured: true, source: body.remember ? 'saved' : 'session' };
+      return json({ status: 'verified' });
+    }
+    assert.equal(action, 'connect');
+    return json({ modelName: 'Fixture Model' });
+  } });
+  snapshot = structuredClone(page.states[0]);
+  let checkbox = elements(page.render(), node => node.type === 'input' && node.props.type === 'checkbox')[0];
+  assert.equal(checkbox.props.checked, true);
+  assert.match(visibleText(page.render()), /Remember this API key.*after restarting Harness/);
+  enterKey(page, 'synthetic-saved-key'); await submitKey(page);
+  assert.equal(submissions[0].remember, true);
+  assert.match(visibleText(page.render()), /API key saved · Ready to connect/);
+  assert.equal(elements(page.render(), node => node.type === 'input').length, 0, 'Saved key never returns to a password field.');
+  assert.equal(JSON.stringify(page.render()).includes('synthetic-saved-key'), false);
+  button(page, 'Change API key').props.onClick();
+  checkbox = elements(page.render(), node => node.type === 'input' && node.props.type === 'checkbox')[0];
+  checkbox.props.onChange({ target: { checked: false } });
+  assert.match(visibleText(page.render()), /Kept in memory for this Harness run only/);
+  enterKey(page, 'synthetic-session-key'); await submitKey(page);
+  assert.equal(submissions[1].remember, false);
+  assert.match(visibleText(page.render()), /API key verified · This Harness run/);
+  page.dispose();
+});
+
+test('saved keys connect directly or can be forgotten, without exposing a credential copy', async () => {
+  let snapshot; const submitted = [];
+  const page = await mountedPage({ language: 'zh', auth: 'required', credential: { required: true, configured: true, source: 'saved' }, credentialStorage: { available: true }, fetch: async (path, init) => {
+    const action = path.split('/').at(-1);
+    if (action === 'state') return json(snapshot);
+    submitted.push({ action, body: JSON.parse(init.body) });
+    if (action === 'connect') return json({ modelName: 'Fixture Model' });
+    assert.equal(action, 'forget-credential');
+    snapshot.candidates[0].credential = { required: true, configured: false, source: null };
+    return json({ cleared: true });
+  } });
+  snapshot = structuredClone(page.states[0]);
+  assert.match(visibleText(page.render()), /API key 已保存 · 可直接连接/);
+  assert.equal(elements(page.render(), node => node.type === 'form').length, 0);
+  await button(page, '连接并新建会话').props.onClick();
+  assert.equal(page.sessionCount(), 1);
+  assert.equal(submitted[0].action, 'connect');
+  assert.equal(Object.hasOwn(submitted[0].body, 'apiKey'), false);
+  await button(page, '清除 API key').props.onClick();
+  assert.deepEqual(submitted[1], { action: 'forget-credential', body: { candidateId: 'vision' } });
+  assert.match(visibleText(page.render()), /需要 API key.*记住此 API key/);
+  page.dispose();
+});
+
+test('storage failures are localized without exposing raw details and session use remains available', async () => {
+  const page = await mountedPage({ auth: 'required', credential: { required: true, configured: false, source: null }, credentialStorage: { available: true } });
+  page.states[1] = { code: 'CREDENTIAL_STORE_FAILED', message: 'raw-storage-detail-do-not-show' };
+  assert.match(visibleText(page.render()), /could not be read or updated/);
+  assert.doesNotMatch(visibleText(page.render()), /raw-storage-detail/);
+  page.switchLanguage('zh');
+  assert.match(visibleText(page.render()), /无法读取或更新已保存的 API key/);
+  page.states[0].credentialStorage.available = false;
+  page.states[1] = { code: 'CREDENTIAL_STORE_UNAVAILABLE', message: 'raw-storage-detail-do-not-show' };
+  assert.equal(elements(page.render(), node => node.type === 'input' && node.props.type === 'checkbox').length, 0);
+  assert.match(visibleText(page.render()), /Harness 凭据存储暂不可用.*仅在本次运行中使用/);
+  assert.doesNotMatch(visibleText(page.render()), /raw-storage-detail/);
+  page.dispose();
+});
+
+test('a retained saved key can be cleared after the discovered identity changes', async () => {
+  const page = await mountedPage({ auth: 'required', credential: { required: true, configured: false, source: null, retainedSaved: true }, credentialStorage: { available: true } });
+  page.states[0].candidates[0].validation.valid = false;
+  assert.equal(button(page, 'Clear API key').props.disabled, false);
+  assert.equal(button(page, 'Verify and connect').props.disabled, true);
+  assert.doesNotMatch(visibleText(page.render()), /API key saved/);
   page.dispose();
 });

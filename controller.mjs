@@ -52,14 +52,17 @@ function validateModels(catalog, capabilities) {
 export class DiscoveryController {
   #credentials = new Map();
   #trust;
-  constructor({ discovery, config = {}, llm, defaults, attribution = {}, readImage, onRequestDiagnostics, transportFactory = createPinnedTransport }) {
+  constructor({ discovery, config = {}, llm, defaults, attribution = {}, readImage, onRequestDiagnostics, credentialStore, transportFactory = createPinnedTransport }) {
     this.discovery = discovery; this.config = config; this.llm = llm; this.defaults = defaults; this.attribution = attribution; this.readImage = readImage; this.onRequestDiagnostics = onRequestDiagnostics; this.transportFactory = transportFactory;
+    this.credentialStore = credentialStore; this.credentialStorageError = null;
     this.routes = new Map(); this.details = new Map(); this.events = []; this.lastRequestDiagnostics = null; this.running = false; this.error = null; this.recoveryError = null; this.recoveryPending = false; this.closed = false; this.tail = Promise.resolve(); this.state = { schema: 'dsh-lan-discovery-state/v1', baseline: null, lastWritten: null }; this.abort = new AbortController();
     this.unsub = discovery.subscribe(event => { this.events.unshift({ at: new Date().toISOString(), type: event.type, instanceName: event.candidate?.instanceName, reason: event.reason }); this.events.length = Math.min(this.events.length, 80); if (event.candidate?.id) this.details.delete(event.candidate.id); });
   }
   serial(fn) { const task = this.tail.then(fn); this.tail = task.catch(() => {}); return task; }
   get stateFile() { return this.config.stateFile ? resolve(this.config.stateFile) : this.config.trustFile ? resolve(dirname(this.config.trustFile), 'plugin-state.json') : undefined; }
   async initialize() {
+    try { await this.credentialStore?.initialize(); }
+    catch { this.credentialStorageError = 'CREDENTIAL_STORE_FAILED'; }
     if (this.config.trustFile) {
       try { this.#trust = await loadTrust(this.config.trustFile); }
       catch { this.error = 'Unsupported local trust document.'; }
@@ -87,12 +90,14 @@ export class DiscoveryController {
     let binding;
     try { if (this.#trust) binding = authorizeCandidate(candidate, this.#trust); } catch { /* No secret metadata for an untrusted candidate. */ }
     const required = binding ? binding.auth === 'required' : candidate.auth !== 'none';
-    const source = binding && required ? this.#credentials.has(binding.identity) ? 'session' : binding.tokenFile ? 'file' : null : null;
+    const source = binding && required ? this.#credentials.has(binding.identity) ? 'session' : this.credentialStore?.has(binding.identity) ? 'saved' : binding.tokenFile ? 'file' : null : null;
     const retainedSession = source !== 'session' && [...this.#credentials.values()].some(entry => entry.candidateId === candidate.id);
-    return { required, configured: source !== null, source, ...(retainedSession ? { retainedSession: true } : {}) };
+    const retainedSaved = source !== 'saved' && (this.credentialStore?.entries() ?? []).some(entry => entry.candidateId === candidate.id);
+    return { required, configured: source !== null, source, ...(retainedSession ? { retainedSession: true } : {}), ...(retainedSaved ? { retainedSaved: true } : {}) };
   }
   snapshot() {
     return { schema: 'dsh-lan-discovery-ui/v1', running: this.running, error: this.recoveryError ?? this.error, recovery: { pending: this.recoveryPending, error: this.recoveryError }, trustConfigured: !!this.config.trustFile,
+      credentialStorage: { available: this.credentialStore?.available === true && !this.credentialStorageError, ...(this.credentialStorageError ? { code: this.credentialStorageError } : {}) },
       candidates: this.candidates().map(candidate => ({ ...candidate, credential: this.credentialStatus(candidate), details: this.details.get(candidate.id) ?? null })),
       connections: [...this.routes.values()].map(route => ({ provider: route.binding.provider, baseURL: route.binding.baseURL, instanceName: route.binding.instanceName, models: route.models, model: route.model })), events: [...this.events], lastRequestDiagnostics: structuredClone(this.lastRequestDiagnostics) };
   }
@@ -110,8 +115,8 @@ export class DiscoveryController {
       this.#trust = trust;
       const binding = authorizeCandidate(candidate, trust);
       if (apiKey !== undefined && binding.auth === 'none') throw new Error('This service does not accept an API key.');
-      if (binding.auth === 'required' && apiKey === undefined && !this.#credentials.has(binding.identity) && !binding.tokenFile) throw credentialError('API_KEY_REQUIRED');
-      transport = this.transportFactory(binding, { attribution: this.attribution, ...(apiKey === undefined ? { getApiKey: () => this.#credentials.get(binding.identity)?.apiKey } : { apiKey }) });
+      if (binding.auth === 'required' && apiKey === undefined && !this.#credentials.has(binding.identity) && !this.credentialStore?.has(binding.identity) && !binding.tokenFile) throw credentialError('API_KEY_REQUIRED');
+      transport = this.transportFactory(binding, { attribution: this.attribution, ...(apiKey === undefined ? { getApiKey: async () => binding.auth === 'none' ? undefined : this.#credentials.get(binding.identity)?.apiKey ?? (this.credentialStore?.has(binding.identity) ? await this.credentialStore.get(binding.identity) : undefined) } : { apiKey }) });
       const [catalog, capabilities] = await Promise.all([transport.json('models', { signal: this.abort.signal }), transport.json(this.config.demoMode === true ? '_demo/capabilities' : '_llm/capabilities', { signal: this.abort.signal })]);
       const models = validateModels(catalog, capabilities);
       // Reject a record update that arrived while authenticated metadata was being read.
@@ -122,23 +127,34 @@ export class DiscoveryController {
       return { binding, transport, models, trust, mock: capabilities.mock === true };
     } catch (error) { transport?.close(); this.details.set(id, { status: 'error', message: error.message, ...(error.code ? { code: error.code } : {}) }); throw error; }
   }
-  setCredential(id, apiKey) { return this.serial(async () => {
+  setCredential(id, apiKey, { remember = false } = {}) { return this.serial(async () => {
     validateApiKey(apiKey);
+    if (typeof remember !== 'boolean') throw new Error('remember must be a boolean.');
+    if (remember && (!this.credentialStore?.available || this.credentialStorageError)) throw Object.assign(new Error('Saved API keys are unavailable in this Harness Host.'), { code: 'CREDENTIAL_STORE_UNAVAILABLE' });
     const prepared = await this.prepare(id, apiKey);
     prepared.transport.close();
-    // Retain only a successfully verified key, scoped to exact endpoint + TLS
-    // identity + approved addresses + auth policy. Never serialize credentials.
-    this.#credentials.set(prepared.binding.identity, { apiKey, candidateId: id });
+    // Only successfully verified keys can be retained. Saved credentials use
+    // the Host's dedicated credential provider, never settings or the journal.
+    const identity = prepared.binding.identity;
+    if (remember) {
+      await this.credentialStore.set(identity, { apiKey, candidateId: id });
+      this.#credentials.delete(identity);
+    } else {
+      if (this.credentialStore?.has(identity)) await this.credentialStore.delete(identity);
+      this.#credentials.set(identity, { apiKey, candidateId: id });
+    }
     return this.details.get(id);
   }); }
   forgetCredential(id) { return this.serial(async () => {
     // Revocation uses locally owned identities, not the latest untrusted DNS
     // record. It must still work after withdrawal or an identity change.
     const identities = new Set([...this.#credentials].filter(([, value]) => value.candidateId === id).map(([identity]) => identity));
+    for (const entry of this.credentialStore?.entries() ?? []) if (entry.candidateId === id) identities.add(entry.identity);
     // An equivalent independently authorized candidate may have a new DNS ID.
     try { identities.add(authorizeCandidate(this.findCandidate(id), this.#trust).identity); } catch { /* Clearing needs no network authorization. */ }
     const routes = [...this.routes.values()].filter(route => route.binding.candidateId === id || identities.has(route.binding.identity));
     for (const route of routes) identities.add(route.binding.identity);
+    for (const identity of identities) if (this.credentialStore?.has(identity)) await this.credentialStore.delete(identity);
     const providers = new Set(routes.map(route => route.binding.provider));
     if (providers.size) {
       const current = this.defaults.read();
