@@ -4,6 +4,15 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing version tag to package
+        required: true
+        type: string
+
+env:
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 permissions:
   contents: read
@@ -17,22 +26,29 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.RELEASE_TAG }}
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
           cache: npm
       - name: Match tag to package version
         shell: bash
-        run: node -e 'const p = require("./package.json"); if (process.env.GITHUB_REF_NAME !== "v" + p.version) throw new Error("Tag must match package version");'
+        run: node -e 'const p = require("./package.json"); if (process.env.RELEASE_TAG !== "v" + p.version) throw new Error("Tag must match package version");'
       - run: npm ci --ignore-scripts
       - run: npm run build
       - run: npm test
       - name: Pack and verify clean offline installation
-        shell: bash
+        shell: pwsh
         run: |
-          mkdir -p dist
+          if ($IsWindows) { $env:PATH = "$env:SystemRoot\System32;$env:PATH" }
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
           npm pack --pack-destination dist
-          npm run verify:release -- dist/dsh-lan-discovery-*.tgz
+          if ($LASTEXITCODE -ne 0) { throw 'npm pack failed.' }
+          $archives = @(Get-ChildItem -LiteralPath dist -Filter 'dsh-lan-discovery-*.tgz')
+          if ($archives.Count -ne 1) { throw 'Expected exactly one plugin package.' }
+          npm run verify:release -- $archives[0].FullName
+          if ($LASTEXITCODE -ne 0) { throw 'Release installation verification failed.' }
       - uses: actions/upload-artifact@v7
         with:
           name: release-package-${{ runner.os }}
@@ -55,11 +71,11 @@ jobs:
           GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
-          existing=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null || true)
+          existing=$(gh release view "$RELEASE_TAG" --json isDraft --jq .isDraft 2>/dev/null || true)
           if [ "$existing" = "false" ]; then
             echo "Release already exists; preserving its published assets."
           elif [ "$existing" = "true" ]; then
-            gh release upload "$GITHUB_REF_NAME" dist/*.tgz dist/SHA256SUMS --clobber
+            gh release upload "$RELEASE_TAG" dist/*.tgz dist/SHA256SUMS --clobber
           else
-            gh release create "$GITHUB_REF_NAME" dist/*.tgz dist/SHA256SUMS --draft --verify-tag --title "LAN discovery $GITHUB_REF_NAME" --generate-notes --notes "Download the .tgz attachment and install it using the bundled Harness Desktop CLI. Supports Desktop 0.2.1-rc.3 and 0.2.1-rc.5. Configure the network interface and independent trust document before connecting; see README."
+            gh release create "$RELEASE_TAG" dist/*.tgz dist/SHA256SUMS --draft --verify-tag --title "LAN discovery $RELEASE_TAG" --generate-notes --notes "Download the .tgz attachment and install it using the bundled Harness Desktop CLI. Supports Desktop 0.2.1-rc.3 and 0.2.1-rc.5. Configure the network interface and independent trust document before connecting; see README."
           fi
