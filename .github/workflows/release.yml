@@ -1,0 +1,65 @@
+name: Publish installable plugin
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Match tag to package version
+        shell: bash
+        run: node -e 'const p = require("./package.json"); if (process.env.GITHUB_REF_NAME !== "v" + p.version) throw new Error("Tag must match package version");'
+      - run: npm ci --ignore-scripts
+      - run: npm run build
+      - run: npm test
+      - name: Pack and verify clean offline installation
+        shell: bash
+        run: |
+          mkdir -p dist
+          npm pack --pack-destination dist
+          npm run verify:release -- dist/dsh-lan-discovery-*.tgz
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-package-${{ runner.os }}
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: release-package-Linux
+          path: dist
+      - name: Prepare draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          existing=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft 2>/dev/null || true)
+          if [ "$existing" = "false" ]; then
+            echo "Release already exists; preserving its published assets."
+          elif [ "$existing" = "true" ]; then
+            gh release upload "$GITHUB_REF_NAME" dist/*.tgz dist/SHA256SUMS --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/*.tgz dist/SHA256SUMS --draft --verify-tag --title "LAN discovery $GITHUB_REF_NAME" --generate-notes --notes "Download the .tgz attachment and install it using the bundled Harness Desktop CLI. Supports Desktop 0.2.1-rc.3 and 0.2.1-rc.5. Configure the network interface and independent trust document before connecting; see README."
+          fi

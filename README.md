@@ -13,7 +13,26 @@ This repository contains the client plugin only. It does not start model servers
 
 The discovery fields follow the experimental [IETF draft](https://datatracker.ietf.org/doc/draft-cui-dawn-local-llm-api-discovery/). The application metadata and local trust documents are project extensions, not standardized draft fields. Read the [service contract](docs/service-contract.md) before integrating a server.
 
-## Build and install
+## Download and install
+
+Download `dsh-lan-discovery-0.5.0.tgz` and `SHA256SUMS` from the [GitHub Release](https://github.com/nobrowning/dsh-lan-discovery/releases/tag/v0.5.0). Choose the `.tgz` attachment, not GitHub's automatically generated source archive. The plugin contains its built browser UI, discovery core, and runtime dependencies; you do not need to clone or build this repository, install the core separately, or install a global `dsh` CLI.
+
+On Windows, check the download against the matching line in `SHA256SUMS`:
+
+```powershell
+Get-FileHash ./dsh-lan-discovery-0.5.0.tgz -Algorithm SHA256
+```
+
+Install DeepSeek Harness Desktop **0.2.1-rc.3 or 0.2.1-rc.5** first, then fully quit it and use that installation's bundled CLI:
+
+```powershell
+$dsh = 'C:/path/to/DeepseekHarness/resources/runtime/cli/bin/dsh.cmd'
+& $dsh plugin --profile desktop add (Resolve-Path './dsh-lan-discovery-0.5.0.tgz').Path
+```
+
+Before connecting, configure `trustFile`, the local `interfaceAddress`, and `networkId` as described below. Obtain the trust document and any required API key from the service operator. The Release does not include user credentials or grant trust to newly discovered endpoints. For a self-contained simulated service setup, use the separate [Demo Release](https://github.com/nobrowning/llm-service-discovery-demo/releases).
+
+## Build from source
 
 From this checkout:
 
@@ -117,6 +136,15 @@ This is an experimental adapter, not full Open Responses conformance. JSON Schem
 
 Edit `src/client.js` and the locale files, then run `npm run build`; do not edit generated `client.js` directly. `npm test` exercises the independent plugin's Host boundaries, locale updates, and recovery behavior without requiring a desktop session or multicast network.
 
-The CI workflow builds, tests, and packs on Windows and Linux using Node.js 24. It retains the package as a workflow artifact and does not publish to npm. Native Desktop integration and real-network interoperability remain separate acceptance checks.
+The CI workflow builds, tests, and packs on Windows and Linux using Node.js 24. Version tags (`v` followed by the package version) trigger a Release workflow that additionally installs the tarball into a clean temporary directory with an empty npm cache in offline mode, verifies the installed Host and browser entry points, and attaches the `.tgz` plus `SHA256SUMS` to a draft GitHub Release. A maintainer checks the downloaded attachments before publishing the draft. It does not publish to npm. Native Desktop integration and real-network interoperability remain separate acceptance checks.
+
+To reproduce the package checks locally after building and testing:
+
+```sh
+npm pack --pack-destination dist
+npm run verify:release -- dist/dsh-lan-discovery-0.5.0.tgz
+```
+
+Create `dist` before running `npm pack`. The verification command writes `SHA256SUMS` beside the archive and removes only its own temporary installation directory when finished.
 
 Licensed under [MIT](LICENSE).

@@ -20,12 +20,14 @@
     "cordis.patch.yml",
     "README.md",
     "LICENSE",
+    "scripts/verify-release.mjs",
     "docs",
     "schemas"
   ],
   "scripts": {
     "build": "node build-client.mjs && node verify.mjs",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test test/*.test.mjs",
+    "verify:release": "node scripts/verify-release.mjs"
   },
   "engines": {
     "node": ">=24",
