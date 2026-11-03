@@ -14,20 +14,36 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - { os: ubuntu-24.04, target: linux-x64, platform: linux, architecture: x64 }
+          - { os: ubuntu-24.04-arm, target: linux-arm64, platform: linux, architecture: arm64 }
+          - { os: windows-latest, target: windows-x64, platform: win32, architecture: x64 }
+          - { os: macos-15, target: macos-arm64, platform: darwin, architecture: arm64 }
+          - { os: macos-15-intel, target: macos-x64, platform: darwin, architecture: x64 }
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
+          architecture: ${{ matrix.architecture }}
           cache: npm
-      - run: npm ci
+      - name: Verify runtime target
+        env:
+          EXPECTED_PLATFORM: ${{ matrix.platform }}
+          EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
+        run: node -e 'if (process.platform !== process.env.EXPECTED_PLATFORM || process.arch !== process.env.EXPECTED_ARCHITECTURE) throw new Error("Unexpected runner target"); console.log(JSON.stringify({platform:process.platform, architecture:process.arch, node:process.version}));'
+      - run: npm ci --ignore-scripts
       - run: npm run build
       - run: npm test
-      - run: npm pack
+      - name: Verify the installable archive
+        shell: bash
+        run: |
+          mkdir -p dist
+          npm pack --pack-destination dist
+          npm run verify:release -- dist/dsh-lan-discovery-*.tgz
       - uses: actions/upload-artifact@v7
         with:
-          name: dsh-lan-discovery-${{ matrix.os }}
-          path: dsh-lan-discovery-*.tgz
+          name: dsh-lan-discovery-${{ matrix.target }}
+          path: dist/*
           if-no-files-found: error
           retention-days: 14

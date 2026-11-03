@@ -12,7 +12,9 @@ const archive = resolve(process.argv[2] ?? '');
 assert.ok(process.argv[2]?.endsWith('.tgz'), 'Pass the final npm tarball path.');
 const sourcePackage = JSON.parse(await readFile(join(sourceRoot, 'package.json'), 'utf8'));
 assert.equal(basename(archive), `${sourcePackage.name}-${sourcePackage.version}.tgz`);
-const archiveFiles = execFileSync('tar', ['-tf', archive], { encoding: 'utf8' }).trim().split(/\r?\n/);
+// A basename avoids GNU tar treating a Windows drive letter as a remote host.
+// These arguments work with GNU tar and the BSD tar shipped by macOS/Windows.
+const archiveFiles = execFileSync('tar', ['-tf', basename(archive)], { cwd: dirname(archive), encoding: 'utf8' }).trim().split(/\r?\n/);
 for (const file of archiveFiles) {
   assert.ok(file.startsWith('package/'), `Unexpected archive path: ${file}`);
   assert.ok(!file.split('/').includes('..'), `Unsafe archive path: ${file}`);
@@ -21,7 +23,8 @@ for (const file of archiveFiles) {
 }
 const npmCli = process.env.npm_execpath;
 assert.ok(npmCli, 'Run this check through npm run verify:release.');
-const installRoot = await mkdtemp(join(tmpdir(), 'dsh-release-check-'));
+// Resolve aliases once, including Windows 8.3 names and macOS /var symlinks.
+const installRoot = await realpath(await mkdtemp(join(tmpdir(), 'dsh-release-check-')));
 try {
   await writeFile(join(installRoot, 'package.json'), JSON.stringify({ name: 'dsh-release-check', private: true, type: 'module' }));
   execFileSync(process.execPath, [npmCli, 'install', '--offline', '--ignore-scripts', '--no-audit', '--no-fund', '--package-lock=false', '--cache', join(installRoot, 'empty-npm-cache'), archive], { cwd: installRoot, stdio: 'pipe' });
@@ -44,7 +47,7 @@ try {
   execFileSync(process.execPath, ['verify.mjs'], { cwd: installedRoot, stdio: 'pipe' });
   const sha256 = createHash('sha256').update(await readFile(archive)).digest('hex');
   await writeFile(join(dirname(archive), 'SHA256SUMS'), `${sha256}  ${basename(archive)}\n`);
-  console.log(JSON.stringify({ package: sourcePackage.name, version: sourcePackage.version, archive: basename(archive), sha256, archiveFiles: archiveFiles.length, offlineInstallWithEmptyCache: true, bundledDependencies: 'verified', hostImports: 'passed', browserBundle: 'passed' }, null, 2));
+  console.log(JSON.stringify({ package: sourcePackage.name, version: sourcePackage.version, platform: process.platform, architecture: process.arch, node: process.version, archive: basename(archive), sha256, archiveFiles: archiveFiles.length, offlineInstallWithEmptyCache: true, bundledDependencies: 'verified', hostImports: 'passed', browserBundle: 'passed' }, null, 2));
 } finally {
   // mkdtemp provides the unique, absolute directory owned by this check.
   await rm(installRoot, { recursive: true, force: true });

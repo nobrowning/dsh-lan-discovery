@@ -11,24 +11,65 @@ This repository contains the client plugin only. It does not start model servers
 - Services announce `_llm-api._tcp.local` and implement the supported **Open Responses subset plus this project's experimental capability metadata endpoint**. Announcement alone does not make an arbitrary existing LLM server compatible; adapt the server or place a compatible API adapter in front of it.
 - Discovery requires mDNS multicast reachability on the selected local network. Inference uses direct HTTPS from the Harness Host to the chosen API.
 
+The same `.tgz` contains portable JavaScript for every target; it includes no OS-specific executable or model weights. Package verification and real Harness acceptance are different checks. Windows Desktop has historical live acceptance; macOS Desktop and Linux Web integration require their own acceptance. The [platform support record](docs/platform-support.md) lists the exact evidence and pending checks. Linux is not an official Harness Desktop release target; use the separately documented Web Host evaluation route below.
+
 The discovery fields follow the experimental [IETF draft](https://datatracker.ietf.org/doc/draft-cui-dawn-local-llm-api-discovery/). The application metadata and local trust documents are project extensions, not standardized draft fields. Read the [service contract](docs/service-contract.md) before integrating a server.
 
 ## Download and install
 
-Download `dsh-lan-discovery-0.5.0.tgz` and `SHA256SUMS` from the [GitHub Release](https://github.com/nobrowning/dsh-lan-discovery/releases/tag/v0.5.0). Choose the `.tgz` attachment, not GitHub's automatically generated source archive. The plugin contains its built browser UI, discovery core, and runtime dependencies; you do not need to clone or build this repository, install the core separately, or install a global `dsh` CLI.
+Download `dsh-lan-discovery-0.5.1.tgz` and `SHA256SUMS` from the [GitHub Release](https://github.com/nobrowning/dsh-lan-discovery/releases/tag/v0.5.1). Choose the `.tgz` attachment, not GitHub's automatically generated source archive. The plugin contains its built browser UI, discovery core, and runtime dependencies; you do not need to clone or build this repository or install the core separately.
 
-On Windows, check the download against the matching line in `SHA256SUMS`:
+### Windows Desktop
+
+Check the download against the matching line in `SHA256SUMS`:
 
 ```powershell
-Get-FileHash ./dsh-lan-discovery-0.5.0.tgz -Algorithm SHA256
+Get-FileHash ./dsh-lan-discovery-0.5.1.tgz -Algorithm SHA256
 ```
 
-Install DeepSeek Harness Desktop **0.2.1-rc.3 or 0.2.1-rc.5** first, then fully quit it and use that installation's bundled CLI:
+Install a compatible DeepSeek Harness Desktop first, launch it once to initialize its profile, then fully quit it. Use that installation's bundled CLI, replacing the example application path. Check that the bundled Harness version is **0.2.1-rc.3 or 0.2.1-rc.5**:
 
 ```powershell
 $dsh = 'C:/path/to/DeepseekHarness/resources/runtime/cli/bin/dsh.cmd'
-& $dsh plugin --profile desktop add (Resolve-Path './dsh-lan-discovery-0.5.0.tgz').Path
+& $dsh --version
+& $dsh plugin --profile desktop add (Resolve-Path './dsh-lan-discovery-0.5.1.tgz').Path
 ```
+
+### macOS Desktop
+
+macOS uses the application's shell launcher, without the `.cmd` suffix. The official Desktop packaging targets include Intel and Apple Silicon; this does not by itself qualify this plugin on either architecture. Use an application with the same supported bundled Harness version and consult the [acceptance record](docs/platform-support.md). Launch Desktop once, fully quit it, then replace the example app path if necessary:
+
+```sh
+shasum -a 256 -c SHA256SUMS
+dsh='/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh'
+"$dsh" --version
+"$dsh" plugin --profile desktop add "$PWD/dsh-lan-discovery-0.5.1.tgz"
+```
+
+The [official Desktop CLI contract](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/desktop/README.md#bundled-command-runtime) describes the bundled launcher and Desktop profile initialization. Do not use an unrelated npm `dsh` installation to manage the Desktop profile.
+
+### Linux Web Host evaluation
+
+The official Desktop [packaging targets](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/desktop/packaging/README.md) exclude Linux. The official CLI can launch the browser UI through its `web` profile. This plugin's Linux package checks do not replace a real Web Host acceptance run; this route remains an integration evaluation until that run is recorded.
+
+With Node.js 24+ installed, use the pinned Harness CLI and an explicitly separate home for this evaluation. The first `npx` invocation downloads Harness and its own dependencies. The plugin tarball already includes its dependencies:
+
+```sh
+sha256sum -c SHA256SUMS
+export DSH_HOME="$HOME/.local/share/llm-discovery-harness"
+npx --yes @deepseek-ai/dsh@0.2.1-rc.5 --version
+npx --yes @deepseek-ai/dsh@0.2.1-rc.5 plugin --help
+npx --yes @deepseek-ai/dsh@0.2.1-rc.5 web --help
+npx --yes @deepseek-ai/dsh@0.2.1-rc.5 plugin --profile web add "$PWD/dsh-lan-discovery-0.5.1.tgz"
+```
+
+Configure the existing `lan-discovery` entry in this home's `profiles/web/cordis.patch.yml` using the example below, then launch:
+
+```sh
+npx --yes @deepseek-ai/dsh@0.2.1-rc.5 web --no-open
+```
+
+Open the local URL printed by Harness. Discovery runs on the **Host machine's network**, so opening that URL on another computer does not move discovery to the browser's LAN. For command syntax, consult the selected binary's `--help`; the [official CLI reference](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cli-help.md) documents the `web` and `plugin --profile` routes. This plugin has no separate executable or `--help` command.
 
 Before connecting, configure `trustFile`, the local `interfaceAddress`, and `networkId` as described below. Obtain the trust document and any required API key from the service operator. The Release does not include user credentials or grant trust to newly discovered endpoints. For a self-contained simulated service setup, use the separate [Demo Release](https://github.com/nobrowning/llm-service-discovery-demo/releases).
 
@@ -45,17 +86,14 @@ npm pack
 
 The core dependency is supplied as a versioned archive in `vendor/`, with dependency integrity recorded in `package-lock.json`. `npm ci` does not require a sibling checkout or an unpublished npm package. The plugin's npm tarball bundles that core and its runtime dependencies.
 
-Fully quit Harness before installing or updating the plugin. Use the **Desktop installation's bundled CLI**, not an unrelated global `dsh`. On Windows, replace the sample installation path below:
-
-```powershell
-$dsh = 'C:/path/to/DeepseekHarness/resources/runtime/cli/bin/dsh.cmd'
-& $dsh plugin --profile desktop add (Resolve-Path './dsh-lan-discovery-0.5.0.tgz').Path
-```
-
-For development, link this checkout instead of the tarball:
+Use the platform's installation command above for the generated tarball. For development, link this checkout instead, using the correct profile and CLI for that Host. For example, with Desktop fully closed:
 
 ```powershell
 & $dsh plugin --profile desktop add (Get-Location).Path
+```
+
+```sh
+"$dsh" plugin --profile desktop add "$PWD"
 ```
 
 A linked installation needs this checkout and its `node_modules` to remain available. After editing linked Host or browser code, fully quit and reopen Harness to load both halves. The Host supplies the declared `@deepseek-ai/dsh-llm` and optional `@deepseek-ai/dsh-tools` peer packages.
@@ -75,7 +113,9 @@ Provision a local trust document independently from discovery; the server operat
     demoMode: false
 ```
 
-Use the client's actual interface address. Keep the existing entry's other fields and other profile entries. `DSH_LAN_DISCOVERY_TRUST_FILE` is an alternative to `trustFile`. `stateFile` optionally changes the recovery-journal location; by default it is `plugin-state.json` beside the trust document.
+Use the Host's actual LAN IPv4 address. Keep the existing entry's other fields and other profile entries. On macOS or Linux, replace the Windows path with an absolute POSIX path such as `/Users/alice/llm-discovery/trust.json` or `/home/alice/llm-discovery/trust.json`. YAML strings are not shell-expanded: `~` and `$HOME` remain literal characters. `DSH_LAN_DISCOVERY_TRUST_FILE` is an alternative to `trustFile`; a shell may expand `$HOME` when setting that environment variable before starting a CLI Host.
+
+`stateFile` optionally changes the recovery-journal location; by default it is `plugin-state.json` beside the trust document. The Host must be able to create and replace files in that directory. If trust is provisioned in a read-only directory such as `/etc/llm-discovery`, set `stateFile` to a writable user location, for example `/home/alice/.local/state/llm-discovery/plugin-state.json`. Do not solve a journal permission error by running the whole Harness as root.
 
 A normal trust document looks like:
 
@@ -108,7 +148,7 @@ Normal services do not receive a generic **Discovered**, **Mock**, or **Real** b
 
 **Remember this API key** is selected by default when the Harness credential provider is available. A successfully verified key is saved through the official Host `credentials` API and remains available after restarting Harness. Clear that checkbox to use the key in memory for this run only. The password field clears immediately on submission; a saved key is represented by its status, never copied back into the field. The Host verifies the model list and `{base}/_llm/capabilities` before retaining the key. A rejected replacement leaves the prior valid key intact. The plugin does not create API keys, enroll accounts, or run an OAuth flow.
 
-Saved keys use the active Harness credential provider under `lan-discovery/service-<identity>`. Storage protection is provided by Harness: the reviewed local provider persists records in profile YAML and does not provide OS-backed encryption. The plugin does not read or rewrite the credential file directly. It never includes keys in UI state, logs, browser storage, plugin configuration, or its recovery journal. If the provider is unavailable, the UI offers session-only use.
+Saved keys use the active Harness credential provider under `lan-discovery/service-<identity>`. Storage protection is provided by Harness: the reviewed local provider persists records in profile YAML and does not provide OS-backed encryption. An OS name does not imply Keychain, Secret Service, or another encrypted credential store; inspect the active Host provider. The plugin does not read or rewrite the credential file directly. It never includes keys in UI state, logs, browser storage, plugin configuration, or its recovery journal. If the provider is unavailable, the UI offers session-only use.
 
 **Disconnect and restore default** keeps keys available for reconnecting. **Clear API key** removes the saved/session key owned by this plugin and disconnects that service. Exiting Harness or reloading/unloading the plugin clears session-only keys; saved keys remain until cleared. Changing a saved key with **Remember** unchecked removes its saved copy after successful validation. An optional `tokenFile` in a required-auth trust entry supplies a pre-provisioned key instead; the UI cannot delete that file, and clearing a plugin-managed override restores the file fallback.
 
@@ -136,13 +176,15 @@ This is an experimental adapter, not full Open Responses conformance. JSON Schem
 
 Edit `src/client.js` and the locale files, then run `npm run build`; do not edit generated `client.js` directly. `npm test` exercises the independent plugin's Host boundaries, locale updates, and recovery behavior without requiring a desktop session or multicast network.
 
-The CI workflow builds, tests, and packs on Windows and Linux using Node.js 24. Version tags (`v` followed by the package version) trigger a Release workflow that additionally installs the tarball into a clean temporary directory with an empty npm cache in offline mode, verifies the installed Host and browser entry points, and attaches the `.tgz` plus `SHA256SUMS` to a draft GitHub Release. A maintainer checks the downloaded attachments before publishing the draft. It does not publish to npm. Native Desktop integration and real-network interoperability remain separate acceptance checks.
+The CI and Release workflows target Windows x64, Linux x64/arm64, and macOS Intel/Apple Silicon using Node.js 24, and assert the actual OS/architecture. Each runs the tests and installs the tarball into a clean temporary directory with an empty npm cache in offline mode. Verification includes Host module imports, browser bundle checks, and an aliased-temporary-directory regression. A configured matrix is not a recorded successful run; current results are in the [platform support record](docs/platform-support.md).
+
+Version tags (`v` followed by the package version) prepare a draft GitHub Release using the Linux x64 build's single portable `.tgz` and `SHA256SUMS` after all matrix checks pass. A maintainer checks the downloaded attachments before publishing the draft. It does not publish to npm. Native Desktop/Web integration and real-network interoperability remain separate acceptance checks.
 
 To reproduce the package checks locally after building and testing:
 
 ```sh
 npm pack --pack-destination dist
-npm run verify:release -- dist/dsh-lan-discovery-0.5.0.tgz
+npm run verify:release -- dist/dsh-lan-discovery-0.5.1.tgz
 ```
 
 Create `dist` before running `npm pack`. The verification command writes `SHA256SUMS` beside the archive and removes only its own temporary installation directory when finished.

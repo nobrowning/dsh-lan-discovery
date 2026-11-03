@@ -23,7 +23,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
+        include:
+          - { os: ubuntu-24.04, target: linux-x64, platform: linux, architecture: x64 }
+          - { os: ubuntu-24.04-arm, target: linux-arm64, platform: linux, architecture: arm64 }
+          - { os: windows-latest, target: windows-x64, platform: win32, architecture: x64 }
+          - { os: macos-15, target: macos-arm64, platform: darwin, architecture: arm64 }
+          - { os: macos-15-intel, target: macos-x64, platform: darwin, architecture: x64 }
     steps:
       - uses: actions/checkout@v7
         with:
@@ -31,7 +36,13 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: '24'
+          architecture: ${{ matrix.architecture }}
           cache: npm
+      - name: Verify runtime target
+        env:
+          EXPECTED_PLATFORM: ${{ matrix.platform }}
+          EXPECTED_ARCHITECTURE: ${{ matrix.architecture }}
+        run: node -e 'if (process.platform !== process.env.EXPECTED_PLATFORM || process.arch !== process.env.EXPECTED_ARCHITECTURE) throw new Error("Unexpected runner target"); console.log(JSON.stringify({platform:process.platform, architecture:process.arch, node:process.version}));'
       - name: Match tag to package version
         shell: bash
         run: node -e 'const p = require("./package.json"); if (process.env.RELEASE_TAG !== "v" + p.version) throw new Error("Tag must match package version");'
@@ -39,38 +50,26 @@ jobs:
       - run: npm run build
       - run: npm test
       - name: Pack and verify clean offline installation
-        shell: pwsh
+        shell: bash
         run: |
-          if ($IsWindows) {
-            $env:PATH = "$env:SystemRoot\System32;$env:PATH"
-            $canonicalTemp = node -p 'require("node:fs").realpathSync.native(require("node:os").tmpdir())'
-            if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the Windows temporary directory.' }
-            $env:TEMP = $canonicalTemp
-            $env:TMP = $canonicalTemp
-            Write-Host "Package verification temp: $canonicalTemp"
-          }
-          New-Item -ItemType Directory -Path dist -Force | Out-Null
+          mkdir -p dist
           npm pack --pack-destination dist
-          if ($LASTEXITCODE -ne 0) { throw 'npm pack failed.' }
-          $archives = @(Get-ChildItem -LiteralPath dist -Filter 'dsh-lan-discovery-*.tgz')
-          if ($archives.Count -ne 1) { throw 'Expected exactly one plugin package.' }
-          npm run verify:release -- $archives[0].FullName
-          if ($LASTEXITCODE -ne 0) { throw 'Release installation verification failed.' }
+          npm run verify:release -- dist/dsh-lan-discovery-*.tgz
       - uses: actions/upload-artifact@v7
         with:
-          name: release-package-${{ runner.os }}
+          name: release-package-${{ matrix.target }}
           path: dist/*
           if-no-files-found: error
 
   publish:
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v7
         with:
-          name: release-package-Linux
+          name: release-package-linux-x64
           path: dist
       - name: Prepare draft GitHub Release
         env:
@@ -84,5 +83,5 @@ jobs:
           elif [ "$existing" = "true" ]; then
             gh release upload "$RELEASE_TAG" dist/*.tgz dist/SHA256SUMS --clobber
           else
-            gh release create "$RELEASE_TAG" dist/*.tgz dist/SHA256SUMS --draft --verify-tag --title "LAN discovery $RELEASE_TAG" --generate-notes --notes "Download the .tgz attachment and install it using the bundled Harness Desktop CLI. Supports Desktop 0.2.1-rc.3 and 0.2.1-rc.5. Configure the network interface and independent trust document before connecting; see README."
+            gh release create "$RELEASE_TAG" dist/*.tgz dist/SHA256SUMS --draft --verify-tag --title "LAN discovery $RELEASE_TAG" --generate-notes --notes "One portable .tgz package for the verified Node targets. Harness integration requires the pinned rc.3/rc.5 Host interfaces; package CI does not qualify a Desktop or Web installation. See README and docs/platform-support.md for platform-specific installation commands, current acceptance evidence, and trust configuration."
           fi
