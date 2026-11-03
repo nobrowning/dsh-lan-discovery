@@ -13,12 +13,17 @@ const source = await readFile(new URL('client.js', pluginRoot), 'utf8');
 async function mountedPage({ language = 'en', error = '', fetch, auth = 'none', credential = { required: false, configured: false, source: null }, credentialStorage = { available: false } } = {}) {
   const service = { id: 'vision', auth, credential, instanceName: 'local-service._llm-api._tcp.local', baseURL: 'https://fixture.local/v1', validation: { valid: true }, details: { mock: true, nodeLabel: 'fixture.local', models: [{ id: 'wire-model', display_name: 'Qwen2.5-VL-7B-Instruct', deployment: { parameters: '7B', version: '2.5-VL', quantization: 'BF16' }, input_modalities: ['text', 'image'], streaming: 'supported', function_calling: 'unsupported' }] } };
   const states = [{ running: true, trustConfigured: true, credentialStorage, connections: [], candidates: [service], events: [{ at: '2026-11-02', type: 'added', instanceName: service.instanceName }] }, error, '', 'all', {}, null, {}, {}, {}];
-  let stateIndex = 0; let definition; let localeSnapshot = { active: language, revision: 0 }; let dictionaries; let dictionaryCount = 0;
+  let stateIndex = 0; let effectIndex = 0; let changed = false; let definition; let localeSnapshot = { active: language, revision: 0 }; let dictionaries; let dictionaryCount = 0;
+  const effectDependencies = [], pendingEffects = [];
   const subscriptions = new Set(); const effects = []; const registrations = new Map(); const pollEffects = []; const intervals = new Set(); let sessionCount = 0;
   const react = {
     createElement(type, props, ...children) { return { type, props: props ?? {}, children }; },
-    useState() { const index = stateIndex++; return [states[index], value => { states[index] = typeof value === 'function' ? value(states[index]) : value; }]; },
-    useCallback(callback) { return callback; }, useEffect(effect) { if (!pollEffects.length) pollEffects.push(effect); },
+    useState(initial) { const index = stateIndex++; if (!(index in states)) states[index] = typeof initial === 'function' ? initial() : initial; return [states[index], value => { const next = typeof value === 'function' ? value(states[index]) : value; changed ||= !Object.is(next, states[index]); states[index] = next; }]; },
+    useCallback(callback) { return callback; }, useEffect(effect, dependencies) {
+      const index = effectIndex++;
+      if (index === 0) { if (!pollEffects.length) pollEffects.push(effect); return; }
+      if (!effectDependencies[index] || dependencies.some((value, i) => !Object.is(value, effectDependencies[index][i]))) { effectDependencies[index] = dependencies; pendingEffects.push(effect); }
+    },
     useSyncExternalStore(subscribe, getSnapshot) { assert.equal(getSnapshot(), localeSnapshot); assert.equal(typeof subscribe, 'function'); return getSnapshot(); },
   };
   vm.runInNewContext(source, { window: { __ModuleLoader__: { load(value) { definition = value; } } }, fetch, setInterval(callback) { intervals.add(callback); return callback; }, clearInterval(callback) { intervals.delete(callback); } });
@@ -32,7 +37,15 @@ async function mountedPage({ language = 'en', error = '', fetch, auth = 'none', 
   plugin.apply({ locale, effect(fn) { effects.push(fn()); }, slots: { inject(_name, fn) { effects.push(fn()); }, register(options, component) { registrations.set(options.name, { options, component }); return () => registrations.delete(options.name); } }, layout: { panelInfo: { getSnapshot: () => ({ activePanelId: null }) }, selectPanel() {} }, uiWorkspace: { startSession() { sessionCount++; } } });
   return {
     plugin, states,
-    render() { stateIndex = 0; const entry = registrations.get('main').component(); return entry.type(entry.props); },
+    render() {
+      for (let attempt = 0; attempt < 10; attempt++) {
+        stateIndex = 0; effectIndex = 0; changed = false;
+        const entry = registrations.get('main').component(), tree = entry.type(entry.props);
+        for (const effect of pendingEffects.splice(0)) effect();
+        if (!changed) return tree;
+      }
+      throw new Error('The page did not settle after its effects.');
+    },
     sidebar() { return registrations.get('sidebar.panellist').options.label(); },
     localeStore() { return registrations.get('main').component().props.localeStore; },
     startPolling() { effects.push(pollEffects[0]()); },
@@ -69,6 +82,16 @@ function enterKey(page, value) {
   input.props.onChange({ target: { value } });
 }
 
+function serviceRow(page, id = 'vision') {
+  const rows = elements(page.render(), node => node.type === 'button' && node.props.className === 'lan-service-toggle' && node.props['data-service-id'] === id);
+  assert.equal(rows.length, 1, 'Expected one service summary button.'); return rows[0];
+}
+
+function openService(page, id = 'vision') {
+  const row = serviceRow(page, id);
+  if (!row.props['aria-expanded']) row.props.onClick();
+}
+
 function submitKey(page) {
   const form = elements(page.render(), node => node.type === 'form')[0];
   assert.ok(form, 'Credential form is visible.');
@@ -76,6 +99,84 @@ function submitKey(page) {
 }
 
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
+
+test('service list initially exposes information only; selecting a service does not connect or send a key', async () => {
+  const calls = [];
+  const page = await mountedPage({ auth: 'required', credential: { required: true, configured: false, source: null }, fetch: async path => { calls.push(path); return json(page.states[0]); } });
+  const original = page.states[0].candidates[0];
+  page.states[0].candidates.push({ ...structuredClone(original), id: 'free', credential: { required: false, configured: false, source: null }, auth: 'none', baseURL: 'https://free.local/v1' }, { ...structuredClone(original), id: 'saved', credential: { required: true, configured: true, source: 'saved' }, baseURL: 'https://saved.local/v1' });
+  const tree = page.render();
+  assert.equal(elements(tree, node => node.type === 'form' || node.type === 'input' || node.props.className === 'lan-service-panel').length, 0);
+  assert.equal(elements(tree, node => node.type === 'button' && /^(Inspect service|Connect and start chat|Change API key|Clear API key)$/.test(visibleText(node))).length, 0);
+  assert.ok(elements(tree, node => node.props.className === 'lan-service-toggle').every(row => row.props['aria-expanded'] === false));
+  assert.match(visibleText(tree), /API key required/); assert.match(visibleText(tree), /No API key required/); assert.match(visibleText(tree), /API key saved/);
+  openService(page);
+  const selected = serviceRow(page);
+  assert.equal(selected.props['aria-expanded'], true);
+  assert.equal(elements(page.render(), node => node.props.id === selected.props['aria-controls']).length, 1);
+  assert.equal(elements(page.render(), node => node.type === 'input' && node.props.type === 'password').length, 1);
+  assert.deepEqual(calls, []); assert.equal(page.sessionCount(), 0);
+  page.dispose();
+});
+
+test('switching, collapsing and Escape remove unsent passwords without modifying saved credentials', async () => {
+  const page = await mountedPage({ auth: 'required', credential: { required: true, configured: false, source: null } });
+  page.states[0].candidates.push({ ...structuredClone(page.states[0].candidates[0]), id: 'saved', credential: { required: true, configured: true, source: 'saved' } });
+  openService(page); enterKey(page, 'synthetic-unsent-secret'); openService(page, 'saved');
+  assert.equal(elements(page.render(), node => node.props.className === 'lan-service-panel').length, 1);
+  assert.equal(JSON.stringify(page.states).includes('synthetic-unsent-secret'), false);
+  assert.equal(page.states[0].candidates[1].credential.source, 'saved');
+  openService(page); assert.equal(elements(page.render(), node => node.props.type === 'password')[0].props.value, '');
+  enterKey(page, 'synthetic-collapse-secret'); serviceRow(page).props.onClick();
+  assert.equal(elements(page.render(), node => node.props.className === 'lan-service-panel').length, 0);
+  assert.equal(JSON.stringify(page.states).includes('synthetic-collapse-secret'), false);
+  openService(page); enterKey(page, 'synthetic-escape-secret');
+  const handler = elements(page.render(), node => typeof node.props.onKeyDown === 'function' && elements(node, child => child.props?.['aria-expanded'] === true).length > 0)[0];
+  assert.ok(handler, 'The expanded service handles Escape.');
+  handler.props.onKeyDown({ key: 'Escape', preventDefault() {}, stopPropagation() {}, currentTarget: { querySelector() { return { focus() {} }; } } });
+  assert.equal(elements(page.render(), node => node.props.className === 'lan-service-panel').length, 0);
+  assert.equal(JSON.stringify(page.states).includes('synthetic-escape-secret'), false);
+  page.dispose();
+});
+
+test('withdrawn services clear unsent inputs and never reopen on discovery updates', async () => {
+  const page = await mountedPage({ auth: 'required', credential: { required: true, configured: false, source: null } });
+  const candidate = structuredClone(page.states[0].candidates[0]);
+  openService(page); enterKey(page, 'synthetic-withdrawn-secret');
+  page.states[0] = { ...page.states[0], candidates: [] }; page.render();
+  assert.equal(JSON.stringify(page.states).includes('synthetic-withdrawn-secret'), false);
+  page.states[0] = { ...page.states[0], candidates: [candidate] };
+  assert.equal(serviceRow(page).props['aria-expanded'], false);
+  assert.equal(elements(page.render(), node => node.type === 'input').length, 0);
+  page.dispose();
+});
+
+test('simulation is an expanded detail, while connection state is independent of service implementation', async () => {
+  const page = await mountedPage(); const candidate = page.states[0].candidates[0];
+  assert.doesNotMatch(visibleText(serviceRow(page)), /MOCK|[Ss]imulat|Discovered|Configured|Connected/);
+  openService(page);
+  assert.match(visibleText(page.render()), /[Ss]imulat/);
+  candidate.details.mock = false;
+  assert.doesNotMatch(visibleText(page.render()), /MOCK|[Ss]imulat/);
+  candidate.details = null;
+  assert.doesNotMatch(visibleText(page.render()), /MOCK|[Ss]imulat|[Rr]eal service/);
+  page.states[0].connections = [{ baseURL: candidate.baseURL }];
+  assert.match(visibleText(serviceRow(page)), /Connected/);
+  page.switchLanguage('zh'); assert.match(visibleText(serviceRow(page)), /已接入/);
+  page.states[0].connections = []; assert.doesNotMatch(visibleText(serviceRow(page)), /已接入/);
+  page.dispose();
+});
+
+test('assistive summaries distinguish same-name hosts and announce deployment and connection details', async () => {
+  const page = await mountedPage(); const candidate = page.states[0].candidates[0];
+  page.states[0].connections = [{ baseURL: candidate.baseURL }];
+  const row = serviceRow(page), tree = page.render();
+  const descriptions = row.props['aria-describedby'].split(' ').map(id => {
+    const nodes = elements(tree, node => node.props.id === id); assert.equal(nodes.length, 1); return visibleText(nodes[0]);
+  }).join(' ');
+  assert.match(descriptions, /fixture\.local/); assert.match(descriptions, /7B parameters/); assert.match(descriptions, /Connected/);
+  page.dispose();
+});
 
 test('page and sidebar follow Harness locale changes without replacing service data', async () => {
   const page = await mountedPage();
@@ -95,6 +196,7 @@ test('page and sidebar follow Harness locale changes without replacing service d
   assert.equal(page.states[0].candidates[0], service, 'A locale change must not reset discovered services.');
   page.switchLanguage('en');
   assert.equal(page.sidebar(), 'LAN services');
+  openService(page);
   assert.match(visibleText(page.render()), /Connect and start chat/);
   unsubscribe(); page.dispose();
 });
@@ -133,6 +235,7 @@ test('credential-free services use a status line, while required services offer 
   assert.equal(elements(page.render(), node => node.type === 'input').length, 0);
   assert.ok(elements(page.render(), node => node.props.className === 'lan-tag').every(node => !/API key/.test(visibleText(node))));
   page.states[0].candidates[0].credential = { required: true, configured: false, source: null };
+  openService(page);
   const required = visibleText(page.render());
   assert.match(required, /API key required/);
   assert.match(required, /Kept in memory for this Harness run only/);
@@ -161,6 +264,7 @@ test('password is cleared before validation settles; rejected keys can be retrie
     return json({ modelName: 'Fixture Model' });
   } });
   snapshot = structuredClone(page.states[0]);
+  openService(page);
   enterKey(page, 'first-synthetic-key');
   const rejected = submitKey(page);
   assert.equal(elements(page.render(), node => node.type === 'input')[0].props.value, '');
@@ -197,6 +301,7 @@ test('configured file credentials cannot be cleared; session credentials can be 
     return json({ ok: true });
   } });
   snapshot = structuredClone(page.states[0]);
+  openService(page);
   assert.match(visibleText(page.render()), /Credential file/);
   assert.equal(elements(page.render(), node => node.type === 'button' && visibleText(node) === 'Clear API key').length, 0);
   button(page, 'Change API key').props.onClick();
@@ -215,6 +320,7 @@ test('configured file credentials cannot be cleared; session credentials can be 
 test('invalid password input is cleared and never sent to the Host', async () => {
   const calls = [];
   const page = await mountedPage({ auth: 'required', credential: { required: true, configured: false, source: null }, fetch: async path => { calls.push(path); return json(page.states[0]); } });
+  openService(page);
   enterKey(page, 'contains a space');
   await submitKey(page);
   assert.ok(calls.every(path => path.endsWith('/state')));
@@ -236,6 +342,7 @@ test('an obsolete retained session key can be cleared without treating the new i
     return json(page.states[0]);
   } });
   const candidate = page.states[0].candidates[0];
+  openService(page);
   candidate.validation.valid = false;
   candidate.draftAuthCompatible = false;
   assert.equal(button(page, 'Clear API key').props.disabled, false, 'Forgetting an old key does not require trusting the current record.');
@@ -265,6 +372,7 @@ test('remember defaults to Harness storage and can be switched to this run only'
     return json({ modelName: 'Fixture Model' });
   } });
   snapshot = structuredClone(page.states[0]);
+  openService(page);
   let checkbox = elements(page.render(), node => node.type === 'input' && node.props.type === 'checkbox')[0];
   assert.equal(checkbox.props.checked, true);
   assert.match(visibleText(page.render()), /Remember this API key.*after restarting Harness/);
@@ -295,6 +403,7 @@ test('saved keys connect directly or can be forgotten, without exposing a creden
     return json({ cleared: true });
   } });
   snapshot = structuredClone(page.states[0]);
+  openService(page);
   assert.match(visibleText(page.render()), /API key 已保存 · 可直接连接/);
   assert.equal(elements(page.render(), node => node.type === 'form').length, 0);
   await button(page, '连接并新建会话').props.onClick();
@@ -309,6 +418,7 @@ test('saved keys connect directly or can be forgotten, without exposing a creden
 
 test('storage failures are localized without exposing raw details and session use remains available', async () => {
   const page = await mountedPage({ auth: 'required', credential: { required: true, configured: false, source: null }, credentialStorage: { available: true } });
+  openService(page);
   page.states[1] = { code: 'CREDENTIAL_STORE_FAILED', message: 'raw-storage-detail-do-not-show' };
   assert.match(visibleText(page.render()), /could not be read or updated/);
   assert.doesNotMatch(visibleText(page.render()), /raw-storage-detail/);
@@ -324,6 +434,7 @@ test('storage failures are localized without exposing raw details and session us
 
 test('a retained saved key can be cleared after the discovered identity changes', async () => {
   const page = await mountedPage({ auth: 'required', credential: { required: true, configured: false, source: null, retainedSaved: true }, credentialStorage: { available: true } });
+  openService(page);
   page.states[0].candidates[0].validation.valid = false;
   assert.equal(button(page, 'Clear API key').props.disabled, false);
   assert.equal(button(page, 'Verify and connect').props.disabled, true);

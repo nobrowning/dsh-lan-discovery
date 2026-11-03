@@ -69,4 +69,6 @@ Disconnecting keeps saved and session keys available for reconnecting. Exiting H
 
 `demoMode: true` is an explicit integration setting for the separate demo repository. It selects the legacy `/_demo/capabilities` route, registers the fixed read-only `demo_read_marker` tool, and enables the Mock-only Host-context metadata convention. The default is false: ordinary installations register no demo tool and send no `demo_context_indices` metadata. The legacy capabilities/trust schema names remain accepted for existing deployments. Do not enable demo mode for unrelated production services.
 
+The optional capability field `mock: true` is a service declaration about simulation. The plugin displays it as a notice inside the expanded service details, not as a general list status or capability badge. A missing or false value does not certify real model inference. Ordinary deployments need no replacement "real" label. The compact list uses the same selection and credential flow for all services; discovering or selecting an entry does not authorize or connect it.
+
 Changing language changes only presentation. Addresses, protocol identifiers, model IDs, credentials and connection identity stay unchanged.

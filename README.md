@@ -1,6 +1,6 @@
 # LAN discovery for DeepSeek Harness
 
-An independent plugin that discovers local LLM API services through mDNS/DNS-SD and connects them to normal DeepSeek Harness conversations. Its sidebar shows model names, deployment details, and distinctive capabilities such as image input or tool calling. English and Chinese follow the Harness language automatically.
+An independent plugin that discovers local LLM API services through mDNS/DNS-SD and connects them to normal DeepSeek Harness conversations. Its compact service list works like a Wi-Fi picker: browse names, addresses, known capabilities and credential status, then select a service to reveal connection controls. English and Chinese follow the Harness language automatically.
 
 This repository contains the client plugin only. It does not start model servers or announce services. The reusable discovery core is a versioned dependency; service advertisement and the Docker demonstration are maintained separately. You can build and install this checkout without cloning those repositories.
 
@@ -30,7 +30,7 @@ Fully quit Harness before installing or updating the plugin. Use the **Desktop i
 
 ```powershell
 $dsh = 'C:/path/to/DeepseekHarness/resources/runtime/cli/bin/dsh.cmd'
-& $dsh plugin --profile desktop add (Resolve-Path './dsh-lan-discovery-0.4.0.tgz').Path
+& $dsh plugin --profile desktop add (Resolve-Path './dsh-lan-discovery-0.5.0.tgz').Path
 ```
 
 For development, link this checkout instead of the tarball:
@@ -75,13 +75,17 @@ A normal trust document looks like:
 
 Paths resolve relative to this document. The sample fingerprint is a placeholder and must be replaced. Credentials and trust paths do not come from multicast announcements. A manually entered API key travels from the password field to the authenticated Harness Host; the Host never returns it in service state, and local trust-file paths do not enter the UI. The legacy `llm-discovery-demo-trust/v1` schema remains accepted.
 
-Open **LAN services**. The service cards distinguish three common cases:
+Open **LAN services**. Initially the list shows service information only; password fields, key management, inspection and connection controls appear after selecting a row. One service expands at a time. Selecting a service does not connect it or change the default model; choose **Connect and start a conversation** or **Verify and connect** explicitly. Collapsing a row or selecting another clears any unsent password. The list distinguishes three common cases:
 
 | Status | What to do |
 |---|---|
-| **No API key required** | Inspect or connect directly. |
-| **API key saved · Ready to connect** | Connect directly, or change/clear the saved key. |
-| **API key required** | Enter the service's key and select **Verify and connect**. |
+| **No API key required** | Expand the row, then inspect or connect without entering a key. |
+| **API key saved · Ready to connect** | Expand the row to connect, or change/clear the saved key. |
+| **API key required** | Expand the row, enter the service's key and select **Verify and connect**. |
+
+A saved-key label describes local credential availability; it does not prove that a key is still valid or that the service is currently reachable. Each connection still verifies the endpoint and service metadata. Discovery alone does not establish trust or compatibility. Unknown model details and capabilities remain unknown until an explicit inspection or connection succeeds.
+
+Normal services do not receive a generic **Discovered**, **Mock**, or **Real** badge. **Connected / 已接入** indicates a service with a registered plugin route. If a service's capability response explicitly declares `mock: true`, its expanded details include a simulation notice. An absent or false `mock` value is not evidence of genuine model inference, and does not create a "real service" badge. This UI is shared by ordinary deployments and the separate Demo.
 
 **Remember this API key** is selected by default when the Harness credential provider is available. A successfully verified key is saved through the official Host `credentials` API and remains available after restarting Harness. Clear that checkbox to use the key in memory for this run only. The password field clears immediately on submission; a saved key is represented by its status, never copied back into the field. The Host verifies the model list and `{base}/_llm/capabilities` before retaining the key. A rejected replacement leaves the prior valid key intact. The plugin does not create API keys, enroll accounts, or run an OAuth flow.
 

@@ -6,7 +6,7 @@ This document records Desktop behavior verified against DeepSeek Harness 0.2.1-r
 
 On 2026-11-03, the installed rc.5 Host and browser bundles were checked against this plugin's actual calls. The following contracts remain available with compatible arguments and results: `connection.fetch.register` exact routes and their owner-principal gate; `llm.registerAdapter` and its callable disposer; `attributionHeaders`; `settings.describe` and revision-checked `settings.mutate`; `loader.await`; `attachments.readImageRequest`; `defineTool` and `tools.register`; `locale.register/bind/subscribe/getSnapshot`; the `main` and `sidebar.panellist` slots; `layout.panelInfo/selectPanel`; and `uiWorkspace.startSession` with `clearPreviousDraft: false`. The Desktop shell still forwards same-origin `dsh-app` Fetch requests using its Host-issued cookie without exposing that cookie to the renderer.
 
-Plugin 0.4.0 explicitly permits rc.3 and rc.5 in its Host engine and optional peer ranges. It does not use a compatibility exemption or allow unreviewed prereleases. The interface review is not a substitute for a live Desktop acceptance run; the separate Demo validation report records which native interactions have actually been repeated on rc.5. No application bundle, extracted source, user profile, or authentication material is redistributed with this review.
+Plugin 0.5.0 explicitly permits rc.3 and rc.5 in its Host engine and optional peer ranges. It does not use a compatibility exemption or allow unreviewed prereleases. The interface review is not a substitute for a live Desktop acceptance run; the separate Demo validation report records which native interactions have actually been repeated on rc.5. No application bundle, extracted source, user profile, or authentication material is redistributed with this review.
 
 ## Host package resolution
 
@@ -20,7 +20,13 @@ After activation returns and the Loader settles, the plugin attempts conditional
 
 Before disabling or uninstalling the plugin, click **Disconnect and restore default** and confirm recovery has completed. An uninstalled plugin cannot consume its retained recovery journal on the next launch.
 
-The UI describes a service as discovered before it is trusted or usable. Capability checks are explicit; unknown capability information does not become a fabricated claim. Nonstream-only services remain visible but cannot be selected by this streaming adapter.
+## Service list interaction and status
+
+The initial view is a compact vertical service list with names, locations or addresses, known model details/capabilities, and authentication status. Each summary is a keyboard-operable button with its expansion state exposed to accessibility tools. Selecting a row reveals that service's inspect/connect controls, model selection, credential form and management actions, and protocol details. Only one row expands at a time. Selection alone performs no connection or default-model change. Collapsing, switching to another service, or withdrawing the selected candidate clears an unsent password; polling does not open a row automatically.
+
+The list contains discovered candidates before they are trusted or usable. There is no generic **Discovered / Mock / Real** header badge. **Connected / 已接入** is shown only when the plugin has a registered route for the service; it is not a continuous health probe. A saved-key label reports that the client has a credential, not that a remote endpoint has just accepted it. Capability checks are explicit; unknown capability information does not become a fabricated claim. Nonstream-only services remain visible but cannot be selected by this streaming adapter.
+
+Only an explicit `mock: true` capability declaration produces a simulation notice, and that notice appears in the expanded details rather than as the primary service status. A false or missing value does not establish that real model inference is running. The same list and connection flow support normal services and Demo fixtures.
 
 ## API key lifecycle
 
