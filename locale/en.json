@@ -1,5 +1,8 @@
 {
   "sidebar": "LAN services",
+  "network.auto": "Follow the current network: rediscover services after a network change, then choose which to connect.",
+  "network.pinned": "Pinned network: discover services only on the selected interface.",
+  "status.waitingAutoHint": "Waiting for an available local network. Discovery will resume automatically on the new network.",
   "title": "LAN LLM services",
   "subtitle": "Choose a nearby API service to view details and connect.",
   "status.connecting": "Connecting to Host",

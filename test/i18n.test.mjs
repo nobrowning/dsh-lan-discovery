@@ -452,6 +452,21 @@ test('a retained saved key can be cleared after the discovered identity changes'
   page.dispose();
 });
 
+test('automatic roaming explains rediscovery without promising automatic connection', async () => {
+  const page = await mountedPage({ language: 'zh' });
+  page.states[0].network = { mode: 'auto', attachment: null };
+  page.states[0].discoveryStatus = 'waiting'; page.states[0].candidates = [];
+  assert.match(visibleText(page.render()), /连接新网络后将自动重新发现服务/);
+  assert.match(visibleText(page.render()), /接入由你确认/);
+  assert.equal(elements(page.render(), node => node.props.className === 'lan-error').length, 0);
+  page.switchLanguage('en');
+  assert.match(visibleText(page.render()), /choose which to connect/);
+  page.states[0].network.mode = 'pinned';
+  assert.match(visibleText(page.render()), /Pinned network/);
+  assert.doesNotMatch(visibleText(page.render()), /resume automatically on the new network/);
+  page.dispose();
+});
+
 test('waiting for network and offline connections use neutral, translated status instead of errors', async () => {
   const page = await mountedPage({ language: 'zh' });
   page.states[0].discoveryStatus = 'waiting'; page.states[0].candidates = [];

@@ -73,7 +73,7 @@ npx --yes @deepseek-ai/dsh@0.2.1-rc.5 web --no-open
 
 Open the local URL printed by Harness. Discovery runs on the **Host machine's network**, so opening that URL on another computer does not move discovery to the browser's LAN. For command syntax, consult the selected binary's `--help`; the [official CLI reference](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cli-help.md) documents the `web` and `plugin --profile` routes. This plugin has no separate executable or `--help` command.
 
-Before connecting, configure `trustFile`, the local `interfaceAddress`, and `networkId` as described below. Obtain the trust document and any required API key from the service operator. The Release does not include user credentials or grant trust to newly discovered endpoints. For a self-contained simulated service setup, use the separate [Demo Release](https://github.com/nobrowning/llm-service-discovery-demo/releases).
+Before connecting, configure `trustFile` and choose automatic network following or an explicitly pinned `interfaceAddress`, as described below. Obtain the trust document and any required API key from the service operator. The Release does not include user credentials or grant trust to newly discovered endpoints. For a self-contained simulated service setup, use the separate [Demo Release](https://github.com/nobrowning/llm-service-discovery-demo/releases).
 
 ## Network and service availability
 
@@ -117,13 +117,17 @@ Provision a local trust document independently from discovery; the server operat
   name: dsh-lan-discovery
   config:
     trustFile: 'C:/llm-discovery/trust.json'
-    interfaceAddress: '192.168.1.10'
+    interfaceMode: auto
     networkId: 'office-lan'
     autoStart: true
     demoMode: false
 ```
 
-Use the Host's actual LAN IPv4 address. Keep the existing entry's other fields, other plugins, and model configuration; do not replace the entire profile or add a duplicate override. The default Host home is `~/.dsh`; use the actual configured home or `DSH_HOME` if it differs. On macOS or Linux, replace the Windows path with an absolute POSIX path such as `/Users/alice/llm-discovery/trust.json` or `/home/alice/llm-discovery/trust.json`. YAML strings are not shell-expanded: `~` and `$HOME` remain literal characters. `DSH_LAN_DISCOVERY_TRUST_FILE` is an alternative to `trustFile`; a shell may expand `$HOME` when setting that environment variable before starting a CLI Host.
+`interfaceMode: auto` follows a usable LAN interface across network changes. A stale `interfaceAddress` retained in an existing configuration does not pin automatic mode. Optionally set `preferredInterfaceName: en0` (use the actual OS device name) to prefer one adapter while following its changing IPv4 address. Without an explicit mode, a configuration containing `interfaceAddress` retains its existing pinned behavior; a fresh configuration without an address uses auto. To pin an address deliberately, set `interfaceMode: pinned` and the Host's actual LAN IPv4 `interfaceAddress`.
+
+Moving from an office network to a home network clears the old discovery candidates, marks old routes unavailable, and discovers the new network's services. Discovery never grants trust or automatically changes the model. Select a new service explicitly; the endpoint, certificate, authorized addresses and credentials are checked again. A configured `networkId` is an application label, not proof of network identity and not an authorization grant.
+
+Keep the existing entry's other fields, other plugins, and model configuration; do not replace the entire profile or add a duplicate override. The default Host home is `~/.dsh`; use the actual configured home or `DSH_HOME` if it differs. On macOS or Linux, replace the Windows path with an absolute POSIX path such as `/Users/alice/llm-discovery/trust.json` or `/home/alice/llm-discovery/trust.json`. YAML strings are not shell-expanded: `~` and `$HOME` remain literal characters. `DSH_LAN_DISCOVERY_TRUST_FILE` is an alternative to `trustFile`; a shell may expand `$HOME` when setting that environment variable before starting a CLI Host.
 
 `stateFile` optionally changes the recovery-journal location; by default it is `plugin-state.json` beside the trust document. The Host must be able to create and replace files in that directory. If trust is provisioned in a read-only directory such as `/etc/llm-discovery`, set `stateFile` to a writable user location, for example `/home/alice/.local/state/llm-discovery/plugin-state.json`. Do not solve a journal permission error by running the whole Harness as root.
 

@@ -79,10 +79,19 @@ export function scheduleDefaultRecovery(controller, loaderSettled, logger) {
   return { completion, cancel() { cancelled = true; } };
 }
 
+export function discoveryOptions(config = {}) {
+  // Keep existing address-pinned installations stable. New installations follow
+  // the current LAN; an explicit auto mode can migrate an existing installation.
+  const interfaceMode = config.interfaceMode ?? (config.interfaceAddress ? 'pinned' : 'auto');
+  if (!['auto', 'pinned'].includes(interfaceMode)) throw new Error('interfaceMode must be auto or pinned.');
+  return { interfaceMode, interfaceAddress: config.interfaceAddress, preferredInterfaceName: config.preferredInterfaceName,
+    networkId: config.networkId, queryIntervalMs: config.queryIntervalMs, waitForNetwork: true };
+}
+
 export async function apply(ctx, supplied = {}) {
   const config = { ...supplied, trustFile: supplied.trustFile ?? process.env.DSH_LAN_DISCOVERY_TRUST_FILE };
   const { attributionHeaders } = await import('@deepseek-ai/dsh-llm');
-  const discovery = createDiscoveryClient({ interfaceAddress: config.interfaceAddress, networkId: config.networkId, queryIntervalMs: config.queryIntervalMs, waitForNetwork: true });
+  const discovery = createDiscoveryClient(discoveryOptions(config));
   const controller = new DiscoveryController({ discovery, config, llm: ctx.llm, defaults: harnessDefaults(ctx.settings), attribution: attributionHeaders(), credentialStore: createHarnessCredentialStore(ctx.get('credentials')),
     onRequestDiagnostics(diagnostic) { ctx.logger?.info?.(`lan-discovery request ${JSON.stringify(diagnostic)}`); },
     async readImage(ref, signal) {

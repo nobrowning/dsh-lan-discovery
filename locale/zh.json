@@ -1,5 +1,8 @@
 {
   "sidebar": "局域网服务",
+  "network.auto": "自动跟随网络：切换网络后重新发现服务，接入由你确认。",
+  "network.pinned": "固定网络：仅在所选接口上发现服务。",
+  "status.waitingAutoHint": "正在等待可用的局域网。连接新网络后将自动重新发现服务。",
   "title": "局域网 LLM 服务",
   "subtitle": "选择附近的 API 服务，查看详情并接入。",
   "status.connecting": "正在连接 Host",

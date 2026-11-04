@@ -68,6 +68,7 @@ export class DiscoveryController {
         if (event.status === 'waiting') for (const route of this.routes.values()) this.markUnavailable(route);
         return;
       }
+      if (event.type === 'network') return;
       this.events.unshift({ at: new Date().toISOString(), type: event.type, instanceName: event.candidate?.instanceName, reason: discoveryReason(event) }); this.events.length = Math.min(this.events.length, 80);
       if (event.candidate?.id) this.details.delete(event.candidate.id);
       if (event.type === 'removed' && event.reason !== 'discovery-stopped') {
@@ -114,7 +115,7 @@ export class DiscoveryController {
     return { required, configured: source !== null, source, ...(retainedSession ? { retainedSession: true } : {}), ...(retainedSaved ? { retainedSaved: true } : {}) };
   }
   snapshot() {
-    return { schema: 'dsh-lan-discovery-ui/v1', running: this.running, discoveryStatus: this.running ? this.discovery.status ?? 'discovering' : 'stopped', error: this.recoveryError ?? this.error, recovery: { pending: this.recoveryPending, error: this.recoveryError }, trustConfigured: !!this.config.trustFile,
+    return { schema: 'dsh-lan-discovery-ui/v1', running: this.running, discoveryStatus: this.running ? this.discovery.status ?? 'discovering' : 'stopped', network: { mode: this.config.interfaceMode ?? (this.config.interfaceAddress ? 'pinned' : 'auto'), attachment: this.discovery.attachment ?? null }, error: this.recoveryError ?? this.error, recovery: { pending: this.recoveryPending, error: this.recoveryError }, trustConfigured: !!this.config.trustFile,
       credentialStorage: { available: this.credentialStore?.available === true && !this.credentialStorageError, ...(this.credentialStorageError ? { code: this.credentialStorageError } : {}) },
       candidates: this.candidates().map(candidate => ({ ...candidate, credential: this.credentialStatus(candidate), details: this.details.get(candidate.id) ?? null })),
       connections: [...this.routes.values()].map(route => ({ provider: route.binding.provider, baseURL: route.binding.baseURL, instanceName: route.binding.instanceName, available: route.available !== false, models: route.models, model: route.model })), events: [...this.events], lastRequestDiagnostics: structuredClone(this.lastRequestDiagnostics) };

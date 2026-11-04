@@ -2,10 +2,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createDiscoveryClient } from '@llm-discovery/discovery-core';
 import { DiscoveryController } from '../controller.mjs';
-import { createFetchHandler } from '../index.mjs';
+import { createFetchHandler, discoveryOptions } from '../index.mjs';
 import { createPinnedTransport } from '../trust.mjs';
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
+
+test('fresh installs follow networks while existing pinned configurations require explicit migration', () => {
+  assert.equal(discoveryOptions().interfaceMode, 'auto');
+  assert.equal(discoveryOptions({ interfaceAddress: '192.168.1.20' }).interfaceMode, 'pinned');
+  const migrated = discoveryOptions({ interfaceAddress: '192.168.1.20', interfaceMode: 'auto', preferredInterfaceName: 'en0', networkId: 'trusted-lab' });
+  assert.equal(migrated.interfaceMode, 'auto');
+  assert.equal(migrated.preferredInterfaceName, 'en0');
+  assert.equal(migrated.networkId, 'trusted-lab');
+  assert.equal(migrated.waitForNetwork, true);
+  assert.throws(() => discoveryOptions({ interfaceMode: 'typo' }), /interfaceMode/);
+});
 
 test('starting with an old network address is a successful waiting state, not an operation error', async t => {
   const discovery = createDiscoveryClient({ interfaceAddress: '192.168.1.163', networkInterfaces: () => ({}), waitForNetwork: true });
