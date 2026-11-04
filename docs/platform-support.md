@@ -1,6 +1,20 @@
 # Platform support and acceptance
 
-Updated 2026-11-03. This record distinguishes portable package checks from an installed Harness connecting to real LAN services. The plugin downloads no model weights and contains no native addon or platform executable; Node.js and Harness themselves must support the target OS and architecture.
+Updated 2026-11-04. This record distinguishes portable package checks from an installed Harness connecting to real LAN services. The plugin downloads no model weights and contains no native addon or platform executable; Node.js and Harness themselves must support the target OS and architecture.
+
+## 0.5.3 stability evidence
+
+The local macOS ARM64 build passed 61 plugin tests, while discovery-core 0.3.2 passed
+20 tests. Empty-cache offline installation and shipped browser/Host checks passed.
+The release workflow separately verifies the final tag on the five package targets.
+
+Actual rc.5 Desktop acceptance of the stability candidate passed unavailable-network
+startup, service withdrawal and restoration, real Wi-Fi loss with Ethernet failover,
+automatic discovery recovery, and explicit reconnect with completed HTTPS responses.
+The existing profile's network/trust settings and saved credentials were retained.
+See [the detailed scope](stability.md#physical-macos-desktop-acceptance--2026-11-04).
+The historical functional checks below remain version-specific; this stability run
+is not a new image/tool/credential-entry acceptance on every platform.
 
 ## 0.5.2 package and Host evidence
 

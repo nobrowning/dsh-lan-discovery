@@ -1,3 +1,4 @@
+import { isNetworkUnavailable, serviceUnavailable } from './availability.mjs';
 /** Deliberately small Responses binding for the documented mock capabilities. */
 // Exact producer contracts verified in the installed Harness 0.2.1-rc.3.
 // Other user-role messages (including unknown plugins and real follow-ups)
@@ -145,7 +146,7 @@ function modelDescription(model, mock) {
 }
 
 export class ResponsesAdapter {
-  constructor({ binding, transport, models, mock = false, demoMode = false, readImage, onRequestDiagnostics }) { this.binding = binding; this.transport = transport; this.models = models; this.mock = mock; this.demoMode = demoMode; this.readImage = readImage; this.onRequestDiagnostics = onRequestDiagnostics; }
+  constructor({ binding, transport, models, mock = false, demoMode = false, readImage, onRequestDiagnostics, isAvailable = () => true, onUnavailable }) { this.binding = binding; this.transport = transport; this.models = models; this.mock = mock; this.demoMode = demoMode; this.readImage = readImage; this.onRequestDiagnostics = onRequestDiagnostics; this.isAvailable = isAvailable; this.onUnavailable = onUnavailable; }
   providerInfo(provider) { return { id: provider, name: `${this.binding.instanceName} · LAN${this.mock ? ' Mock' : ''}` }; }
   providerRetryPolicy() { return undefined; }
   imageRequestPricing() { return undefined; }
@@ -158,15 +159,25 @@ export class ResponsesAdapter {
   }
   async prepareCall(provider, model, signal) { return { model: await this.resolveModel(provider, model), stream: options => this.stream({ ...options, signal: options.signal ?? signal }) }; }
   async *stream(options) {
+    if (!this.isAvailable()) throw serviceUnavailable();
+    const transport = this.transport;
     await this.resolveModel(options.provider, options.model);
     const model = this.models.find(model => model.id === options.model);
     if (model.streaming !== 'supported') throw new Error('This client adapter requires a declared streaming Responses service.');
     const body = await buildResponsesRequest(options, { readImage: this.readImage, imageSupported: model.input_modalities?.includes('image'), functionCalling: model.function_calling === 'supported', demoMode: this.demoMode });
     this.onRequestDiagnostics?.(requestShapeDiagnostics(options, body));
-    const response = await this.transport.open('responses', { method: 'POST', body, signal: options.signal });
+    if (!this.isAvailable() || transport !== this.transport) throw serviceUnavailable();
+    let response;
     try {
+      response = await transport.open('responses', { method: 'POST', body, signal: options.signal });
       if (!String(response.headers['content-type']).toLowerCase().startsWith('text/event-stream')) throw new Error('The selected service did not return SSE.');
       yield* responsesToHarness(parseSSE(response));
-    } finally { response.destroy(); }
+    } catch (error) {
+      if (!options.signal?.aborted && (!this.isAvailable() || transport !== this.transport || error.code === 'SERVICE_UNAVAILABLE' || isNetworkUnavailable(error))) {
+        if (transport === this.transport) this.onUnavailable?.();
+        throw serviceUnavailable();
+      }
+      throw error;
+    } finally { response?.destroy(); }
   }
 }

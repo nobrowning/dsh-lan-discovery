@@ -83,5 +83,10 @@
   "error.apiKeyRejected": "The service rejected the API key. Enter a new key and try again.",
   "error.apiKeyInvalid": "Enter a valid API key: 1–4096 visible ASCII characters, without spaces.",
   "error.credentialStoreUnavailable": "Harness credential storage is unavailable. Use a key for this run only, or retry later.",
-  "error.credentialStoreFailed": "The saved API key could not be read or updated. Retry, or use a key for this run only."
+  "error.credentialStoreFailed": "The saved API key could not be read or updated. Retry, or use a key for this run only.",
+  "status.waiting": "Waiting for network",
+  "status.waitingHint": "The selected network is currently unavailable. Discovery will resume automatically when it returns. You can keep using other models.",
+  "status.serviceUnavailable": "This LAN service is temporarily unavailable. Reconnect when it returns, or select another model. Saved API keys are retained.",
+  "status.hostUnavailable": "Reconnecting to Harness. Controls will be available when the connection returns.",
+  "status.discoveryError": "Discovery unavailable"
 }

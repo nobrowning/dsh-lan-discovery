@@ -53,7 +53,7 @@ export function createFetchHandler(controller) {
       else if (path === '/api/lan-discovery/disconnect') result = await controller.disconnect();
       else return send(404, { error: 'Unknown operation.' });
       return send(200, result ?? { ok: true });
-    } catch (error) { return send(400, { error: error instanceof Error ? error.message : 'LAN operation failed.', ...(['API_KEY_REQUIRED', 'API_KEY_REJECTED', 'API_KEY_INVALID', 'CREDENTIAL_STORE_UNAVAILABLE', 'CREDENTIAL_STORE_FAILED'].includes(error.code) ? { code: error.code } : {}) }); }
+    } catch (error) { return send(error.code === 'SERVICE_UNAVAILABLE' ? 409 : 400, { error: error instanceof Error ? error.message : 'LAN operation failed.', ...(['SERVICE_UNAVAILABLE', 'API_KEY_REQUIRED', 'API_KEY_REJECTED', 'API_KEY_INVALID', 'CREDENTIAL_STORE_UNAVAILABLE', 'CREDENTIAL_STORE_FAILED'].includes(error.code) ? { code: error.code } : {}) }); }
   };
 }
 
@@ -82,7 +82,7 @@ export function scheduleDefaultRecovery(controller, loaderSettled, logger) {
 export async function apply(ctx, supplied = {}) {
   const config = { ...supplied, trustFile: supplied.trustFile ?? process.env.DSH_LAN_DISCOVERY_TRUST_FILE };
   const { attributionHeaders } = await import('@deepseek-ai/dsh-llm');
-  const discovery = createDiscoveryClient({ interfaceAddress: config.interfaceAddress, networkId: config.networkId, queryIntervalMs: config.queryIntervalMs });
+  const discovery = createDiscoveryClient({ interfaceAddress: config.interfaceAddress, networkId: config.networkId, queryIntervalMs: config.queryIntervalMs, waitForNetwork: true });
   const controller = new DiscoveryController({ discovery, config, llm: ctx.llm, defaults: harnessDefaults(ctx.settings), attribution: attributionHeaders(), credentialStore: createHarnessCredentialStore(ctx.get('credentials')),
     onRequestDiagnostics(diagnostic) { ctx.logger?.info?.(`lan-discovery request ${JSON.stringify(diagnostic)}`); },
     async readImage(ref, signal) {

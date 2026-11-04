@@ -26,3 +26,15 @@ test('malformed completed function arguments never echo an upstream credential f
   })();
   await assert.rejects(collect(responsesToHarness(events)), sanitized('The service returned invalid function arguments.'));
 });
+
+test('an interrupted stream reports temporary unavailability and releases the response', async () => {
+  const { ResponsesAdapter } = await import('../responses.mjs');
+  let destroyed = false, unavailable = 0;
+  const response = {
+    headers: { 'content-type': 'text/event-stream' }, destroy() { destroyed = true; },
+    async *[Symbol.asyncIterator]() { throw Object.assign(new Error('socket reset'), { code: 'ECONNRESET' }); },
+  };
+  const adapter = new ResponsesAdapter({ binding: { provider: 'lan-test' }, models: [{ id: 'test', streaming: 'supported', input_modalities: ['text'] }], transport: { async open() { return response; } }, onUnavailable() { unavailable++; } });
+  await assert.rejects(collect(adapter.stream({ provider: 'lan-test', model: 'test', messages: [] })), { code: 'SERVICE_UNAVAILABLE' });
+  assert.equal(destroyed, true); assert.equal(unavailable, 1);
+});

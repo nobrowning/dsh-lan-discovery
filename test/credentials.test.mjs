@@ -17,11 +17,12 @@ async function fixture(t, provider) {
   const document = { schema: 'llm-api-discovery-trust/v1', caFile: 'ca.pem', services };
   await writeFile(trustFile, JSON.stringify(document));
   const candidates = services.map((service, i) => ({ id: ['one', 'two', 'free'][i], instanceName: `fixture-${i}`, baseURL: service.baseURL, auth: service.auth, apiProfile: 'openresponses', protocolVersion: '2026-04-24', addresses: ['127.0.0.1'], validation: { valid: true }, expiresAt: Date.now() + 60000 }));
+  let discoveryListener;
   const seen = [], adapters = new Map(); let current = { value: { provider: 'original', model: 'original' }, revision: 1 };
   const createController = () => new DiscoveryController({
     credentialStore: createHarnessCredentialStore(provider),
     config: { trustFile, autoStart: false },
-    discovery: { subscribe() { return () => {}; }, snapshot: () => candidates, async start() {}, async stop() {} },
+    discovery: { subscribe(listener) { discoveryListener = listener; return () => {}; }, snapshot: () => candidates, async start() {}, async stop() {} },
     defaults: { read: () => structuredClone(current), async compareAndSet(expected, value) { assert.deepEqual(expected, current); current = { value, revision: current.revision + 1 }; return structuredClone(current); } },
     llm: { registerAdapter(providers, adapter) { adapters.set(providers[0], adapter); return () => adapters.delete(providers[0]); } },
     transportFactory(binding, options) {
@@ -40,7 +41,7 @@ async function fixture(t, provider) {
   });
   let controller = createController(); await controller.initialize();
   t.after(async () => { await controller.close(); const target = resolve(dir); assert.ok(target.startsWith(resolve(tmpdir()) + sep) && target.includes('dsh-lan-credential-test-')); await rm(target, { recursive: true, force: true }); });
-  return { dir, get controller() { return controller; }, trustFile, document, candidates, seen, adapters, async restart() { await controller.close(); controller = createController(); await controller.initialize(); }, get current() { return current; }, selectProvider(provider, model = 'model') { current = { value: { provider, model }, revision: current.revision + 1 }; } };
+  return { dir, emit(event) { discoveryListener(event); }, get controller() { return controller; }, trustFile, document, candidates, seen, adapters, async restart() { await controller.close(); controller = createController(); await controller.initialize(); }, get current() { return current; }, selectProvider(provider, model = 'model') { current = { value: { provider, model }, revision: current.revision + 1 }; } };
 }
 
 function memoryProvider() {
@@ -202,4 +203,58 @@ test('key routes validate bounded input and never echo malformed credential JSON
   assert.equal((await handler(request('credential', { candidateId: 'one', apiKey: keys.one }))).status, 200);
   assert.equal((await handler(request('forget-credential', { candidateId: 'one' }))).status, 200);
   assert.throws(() => validateApiKey('bad\r\nHeader:value'), { code: 'API_KEY_INVALID' });
+});
+
+test('network loss makes existing routes unavailable without deleting saved keys or changing defaults', async t => {
+  const provider = memoryProvider(), f = await fixture(t, provider);
+  await f.controller.setCredential('one', keys.one, { remember: true });
+  const connected = await f.controller.connect('one');
+  const current = structuredClone(f.current);
+  const oldRoute = f.controller.routes.get(connected.provider);
+  const oldTransport = oldRoute.transport;
+  const old = f.candidates.shift();
+  f.emit({ type: 'removed', candidate: old, reason: 'network-attachment-changed' });
+  assert.equal(f.controller.snapshot().connections[0].available, false);
+  assert.equal(f.controller.snapshot().error, null);
+  assert.deepEqual(f.current, current);
+  assert.equal(provider.records.size, 1);
+  const requestsBefore = f.seen.length;
+  await assert.rejects(oldRoute.adapter.stream({}).next(), { code: 'SERVICE_UNAVAILABLE' });
+  assert.equal(f.seen.length, requestsBefore, 'An offline route must not send requests.');
+  const response = await createFetchHandler(f.controller)(new Request('http://host/api/lan-discovery/connect', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ candidateId: old.id }) }));
+  assert.equal(response.status, 409); assert.equal((await response.json()).code, 'SERVICE_UNAVAILABLE');
+  const returned = { ...old, id: 'new-attachment:one' }; f.candidates.unshift(returned);
+  f.emit({ type: 'added', candidate: returned });
+  assert.equal(f.controller.snapshot().connections[0].available, false, 'Discovery alone must not reconnect.');
+  await f.controller.connect(returned.id);
+  assert.equal(f.controller.snapshot().connections[0].available, true);
+  assert.notEqual(oldRoute.transport, oldTransport);
+  assert.equal(oldRoute.adapter.transport, oldRoute.transport);
+  assert.equal(oldRoute.binding.candidateId, returned.id);
+  assert.equal(f.adapters.size, 1, 'Reconnect must not duplicate registered providers.');
+  assert.equal(provider.records.size, 1);
+});
+
+test('stopping discovery keeps verified connections usable; an offline route can still disconnect', async t => {
+  const f = await fixture(t, memoryProvider());
+  const connected = await f.controller.connect('free');
+  const candidate = f.candidates.find(row => row.id === 'free');
+  f.emit({ type: 'removed', candidate, reason: 'discovery-stopped' });
+  assert.equal(f.controller.snapshot().connections[0].available, true);
+  f.emit({ type: 'removed', candidate, reason: 'records-withdrawn-or-expired' });
+  assert.equal(f.controller.snapshot().connections[0].available, false);
+  assert.equal((await f.controller.disconnect()).restored, true);
+  assert.equal(f.current.value.provider, 'original');
+  assert.equal(f.adapters.has(connected.provider), false);
+});
+
+test('network loss invalidates routes retained across stop/start even before any new announcements', async t => {
+  const f = await fixture(t, memoryProvider());
+  await f.controller.connect('free');
+  const candidate = f.candidates.find(row => row.id === 'free');
+  f.emit({ type: 'removed', candidate, reason: 'discovery-stopped' });
+  f.candidates.length = 0;
+  f.emit({ type: 'status', status: 'waiting' });
+  assert.equal(f.controller.snapshot().connections[0].available, false);
+  assert.equal(f.controller.snapshot().error, null);
 });

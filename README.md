@@ -17,14 +17,14 @@ The discovery fields follow the experimental [IETF draft](https://datatracker.ie
 
 ## Download and install
 
-Download `dsh-lan-discovery-0.5.2.tgz` and `SHA256SUMS` from the [GitHub Release](https://github.com/nobrowning/dsh-lan-discovery/releases/tag/v0.5.2). Choose the `.tgz` attachment, not GitHub's automatically generated source archive. The plugin contains its built browser UI, discovery core, and runtime dependencies; you do not need to clone or build this repository or install the core separately.
+Download `dsh-lan-discovery-0.5.3.tgz` and `SHA256SUMS` from the [GitHub Release](https://github.com/nobrowning/dsh-lan-discovery/releases/tag/v0.5.3). Choose the `.tgz` attachment, not GitHub's automatically generated source archive. The plugin contains its built browser UI, discovery core, and runtime dependencies; you do not need to clone or build this repository or install the core separately.
 
 ### Windows Desktop
 
 Check the download against the matching line in `SHA256SUMS`:
 
 ```powershell
-Get-FileHash ./dsh-lan-discovery-0.5.2.tgz -Algorithm SHA256
+Get-FileHash ./dsh-lan-discovery-0.5.3.tgz -Algorithm SHA256
 ```
 
 Install a compatible DeepSeek Harness Desktop first, launch it once to initialize its profile, then fully quit it. Use that installation's bundled CLI, replacing the example application path. Check that the bundled Harness version is **0.2.1-rc.3 or 0.2.1-rc.5**:
@@ -32,7 +32,7 @@ Install a compatible DeepSeek Harness Desktop first, launch it once to initializ
 ```powershell
 $dsh = 'C:/path/to/DeepseekHarness/resources/runtime/cli/bin/dsh.cmd'
 & $dsh --version
-& $dsh plugin --profile desktop add (Resolve-Path './dsh-lan-discovery-0.5.2.tgz').Path
+& $dsh plugin --profile desktop add (Resolve-Path './dsh-lan-discovery-0.5.3.tgz').Path
 ```
 
 ### macOS Desktop
@@ -43,7 +43,7 @@ macOS uses the application's shell launcher, without the `.cmd` suffix. The curr
 shasum -a 256 -c SHA256SUMS
 dsh='/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh'
 "$dsh" --version
-"$dsh" plugin --profile desktop add "$PWD/dsh-lan-discovery-0.5.2.tgz"
+"$dsh" plugin --profile desktop add "$PWD/dsh-lan-discovery-0.5.3.tgz"
 ```
 
 The [official Desktop CLI contract](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/desktop/README.md#bundled-command-runtime) describes the bundled launcher and Desktop profile initialization. Do not use an unrelated npm `dsh` installation to manage the Desktop profile.
@@ -62,7 +62,7 @@ export DSH_HOME="$HOME/.local/share/llm-discovery-harness"
 npx --yes @deepseek-ai/dsh@0.2.1-rc.5 --version
 npx --yes @deepseek-ai/dsh@0.2.1-rc.5 plugin --help
 npx --yes @deepseek-ai/dsh@0.2.1-rc.5 web --help
-npx --yes @deepseek-ai/dsh@0.2.1-rc.5 plugin --profile web add "$PWD/dsh-lan-discovery-0.5.2.tgz"
+npx --yes @deepseek-ai/dsh@0.2.1-rc.5 plugin --profile web add "$PWD/dsh-lan-discovery-0.5.3.tgz"
 ```
 
 Merge the `lan-discovery` configuration into this home's `profiles/web/cordis.patch.yml` using the example below, then launch:
@@ -74,6 +74,14 @@ npx --yes @deepseek-ai/dsh@0.2.1-rc.5 web --no-open
 Open the local URL printed by Harness. Discovery runs on the **Host machine's network**, so opening that URL on another computer does not move discovery to the browser's LAN. For command syntax, consult the selected binary's `--help`; the [official CLI reference](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cli-help.md) documents the `web` and `plugin --profile` routes. This plugin has no separate executable or `--help` command.
 
 Before connecting, configure `trustFile`, the local `interfaceAddress`, and `networkId` as described below. Obtain the trust document and any required API key from the service operator. The Release does not include user credentials or grant trust to newly discovered endpoints. For a self-contained simulated service setup, use the separate [Demo Release](https://github.com/nobrowning/llm-service-discovery-demo/releases).
+
+## Network and service availability
+
+Version 0.5.3 treats network absence as **Waiting for network** and service loss as
+**Temporarily unavailable**, rather than a generic operation failure. Discovery
+resumes when the selected network returns. Saved API keys remain available; a
+service must be explicitly reconnected and revalidated after it returns.
+See [stability behavior and acceptance](docs/stability.md).
 
 ## Build from source
 
@@ -186,7 +194,7 @@ To reproduce the package checks locally after building and testing:
 
 ```sh
 npm pack --pack-destination dist
-npm run verify:release -- dist/dsh-lan-discovery-0.5.2.tgz
+npm run verify:release -- dist/dsh-lan-discovery-0.5.3.tgz
 ```
 
 Create `dist` before running `npm pack`. The verification command writes `SHA256SUMS` beside the archive and removes only its own temporary installation directory when finished.

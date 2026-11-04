@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { loadTrust, authorizeCandidate, createPinnedTransport, validateApiKey, credentialError } from './trust.mjs';
 import { ResponsesAdapter, modelDisplayName } from './responses.mjs';
+import { isNetworkUnavailable, serviceUnavailable } from './availability.mjs';
 
 const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
 const selection = value => ({ provider: value.provider, model: value.model, ...(value.reasoningEffort === undefined ? {} : { reasoningEffort: value.reasoningEffort }) });
@@ -62,8 +63,19 @@ export class DiscoveryController {
     this.discovery = discovery; this.config = config; this.llm = llm; this.defaults = defaults; this.attribution = attribution; this.readImage = readImage; this.onRequestDiagnostics = onRequestDiagnostics; this.transportFactory = transportFactory;
     this.credentialStore = credentialStore; this.credentialStorageError = null;
     this.routes = new Map(); this.details = new Map(); this.events = []; this.lastRequestDiagnostics = null; this.running = false; this.error = null; this.recoveryError = null; this.recoveryPending = false; this.closed = false; this.tail = Promise.resolve(); this.state = { schema: 'dsh-lan-discovery-state/v1', baseline: null, lastWritten: null }; this.abort = new AbortController();
-    this.unsub = discovery.subscribe(event => { this.events.unshift({ at: new Date().toISOString(), type: event.type, instanceName: event.candidate?.instanceName, reason: discoveryReason(event) }); this.events.length = Math.min(this.events.length, 80); if (event.candidate?.id) this.details.delete(event.candidate.id); });
+    this.unsub = discovery.subscribe(event => {
+      if (event.type === 'status') {
+        if (event.status === 'waiting') for (const route of this.routes.values()) this.markUnavailable(route);
+        return;
+      }
+      this.events.unshift({ at: new Date().toISOString(), type: event.type, instanceName: event.candidate?.instanceName, reason: discoveryReason(event) }); this.events.length = Math.min(this.events.length, 80);
+      if (event.candidate?.id) this.details.delete(event.candidate.id);
+      if (event.type === 'removed' && event.reason !== 'discovery-stopped') {
+        for (const route of this.routes.values()) if (route.binding.candidateId === event.candidate?.id) this.markUnavailable(route);
+      }
+    });
   }
+  markUnavailable(route) { if (route.available === false) return; route.available = false; route.transport.close(); }
   serial(fn) { const task = this.tail.then(fn); this.tail = task.catch(() => {}); return task; }
   get stateFile() { return this.config.stateFile ? resolve(this.config.stateFile) : this.config.trustFile ? resolve(dirname(this.config.trustFile), 'plugin-state.json') : undefined; }
   async initialize() {
@@ -89,8 +101,8 @@ export class DiscoveryController {
     await writeFile(temporary, JSON.stringify(this.state, null, 2), { encoding: 'utf8', mode: 0o600 });
     await rename(temporary, this.stateFile);
   }
-  async start() { if (this.running) return; try { await this.discovery.start(); this.running = true; this.error = null; } catch (error) { this.error = `Discovery could not start: ${error.message}`; throw error; } }
-  async stop() { await this.discovery.stop(); this.running = false; }
+  start() { return this.serial(async () => { if (this.closed || this.running) return; try { await this.discovery.start(); this.running = true; this.error = null; } catch (error) { this.error = `Discovery could not start: ${error.message}`; throw error; } }); }
+  stop() { return this.serial(async () => { await this.discovery.stop(); this.running = false; }); }
   candidates() { const value = this.discovery.snapshot(); return Array.isArray(value) ? value : value.candidates ?? []; }
   credentialStatus(candidate) {
     let binding;
@@ -102,15 +114,15 @@ export class DiscoveryController {
     return { required, configured: source !== null, source, ...(retainedSession ? { retainedSession: true } : {}), ...(retainedSaved ? { retainedSaved: true } : {}) };
   }
   snapshot() {
-    return { schema: 'dsh-lan-discovery-ui/v1', running: this.running, error: this.recoveryError ?? this.error, recovery: { pending: this.recoveryPending, error: this.recoveryError }, trustConfigured: !!this.config.trustFile,
+    return { schema: 'dsh-lan-discovery-ui/v1', running: this.running, discoveryStatus: this.running ? this.discovery.status ?? 'discovering' : 'stopped', error: this.recoveryError ?? this.error, recovery: { pending: this.recoveryPending, error: this.recoveryError }, trustConfigured: !!this.config.trustFile,
       credentialStorage: { available: this.credentialStore?.available === true && !this.credentialStorageError, ...(this.credentialStorageError ? { code: this.credentialStorageError } : {}) },
       candidates: this.candidates().map(candidate => ({ ...candidate, credential: this.credentialStatus(candidate), details: this.details.get(candidate.id) ?? null })),
-      connections: [...this.routes.values()].map(route => ({ provider: route.binding.provider, baseURL: route.binding.baseURL, instanceName: route.binding.instanceName, models: route.models, model: route.model })), events: [...this.events], lastRequestDiagnostics: structuredClone(this.lastRequestDiagnostics) };
+      connections: [...this.routes.values()].map(route => ({ provider: route.binding.provider, baseURL: route.binding.baseURL, instanceName: route.binding.instanceName, available: route.available !== false, models: route.models, model: route.model })), events: [...this.events], lastRequestDiagnostics: structuredClone(this.lastRequestDiagnostics) };
   }
   findCandidate(id) {
     const candidate = this.candidates().find(item => item.id === id);
-    if (!candidate) throw new Error('The service is no longer present on the current network.');
-    if (candidate.expiresAt && new Date(candidate.expiresAt).getTime() <= Date.now()) throw new Error('The discovery records expired.');
+    if (!candidate) throw serviceUnavailable();
+    if (candidate.expiresAt && new Date(candidate.expiresAt).getTime() <= Date.now()) throw serviceUnavailable();
     return candidate;
   }
   async prepare(id, apiKey) {
@@ -131,7 +143,10 @@ export class DiscoveryController {
       const details = { status: 'verified', checkedAt: new Date().toISOString(), mock: capabilities.mock === true, nodeLabel: capabilities.node_label ?? capabilities.demo_node_label, models, compatible: models.some(model => model.streaming === 'supported') };
       this.details.set(id, details);
       return { binding, transport, models, trust, mock: capabilities.mock === true };
-    } catch (error) { transport?.close(); this.details.set(id, { status: 'error', message: error.message, ...(error.code ? { code: error.code } : {}) }); throw error; }
+    } catch (error) {
+      if (isNetworkUnavailable(error)) error = serviceUnavailable();
+      if (error.code === 'SERVICE_UNAVAILABLE') for (const route of this.routes.values()) if (route.binding.candidateId === id) this.markUnavailable(route);
+      transport?.close(); this.details.set(id, { status: error.code === 'SERVICE_UNAVAILABLE' ? 'unavailable' : 'error', message: error.message, ...(error.code ? { code: error.code } : {}) }); throw error; }
   }
   setCredential(id, apiKey, { remember = false } = {}) { return this.serial(async () => {
     validateApiKey(apiKey);
@@ -188,10 +203,15 @@ export class DiscoveryController {
     const next = { provider: prepared.binding.provider, model: model.id };
     let route = this.routes.get(next.provider); let created = false;
     if (!route) {
-      const adapter = new ResponsesAdapter({ ...prepared, demoMode: this.config.demoMode === true, readImage: this.readImage, onRequestDiagnostics: diagnostic => { this.lastRequestDiagnostics = diagnostic; this.onRequestDiagnostics?.(diagnostic); } });
+      const adapter = new ResponsesAdapter({ ...prepared, isAvailable: () => route?.available !== false, onUnavailable: () => { if (route) this.markUnavailable(route); }, demoMode: this.config.demoMode === true, readImage: this.readImage, onRequestDiagnostics: diagnostic => { this.lastRequestDiagnostics = diagnostic; this.onRequestDiagnostics?.(diagnostic); } });
       const unregister = this.llm.registerAdapter([next.provider], adapter);
       const baseline = this.state.baseline ?? (before.value.provider.startsWith('lan-') ? this.routes.get(before.value.provider)?.baseline : before.value);
-      route = { ...prepared, model: model.id, baseline, adapter, unregister }; this.routes.set(next.provider, route); created = true;
+      route = { ...prepared, available: true, model: model.id, baseline, adapter, unregister }; this.routes.set(next.provider, route); created = true;
+    } else if (route.available === false || route.binding.candidateId !== prepared.binding.candidateId) {
+      // Reconnection revalidates trust and credentials before replacing the stale transport.
+      route.transport.close();
+      Object.assign(route, prepared, { available: true });
+      Object.assign(route.adapter, prepared);
     } else prepared.transport.close();
     const previousState = structuredClone(this.state);
     try {

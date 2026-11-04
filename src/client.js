@@ -5,6 +5,7 @@ window.__ModuleLoader__.load({ id: 'dsh-lan-discovery', factory: require => {
   const NS = 'lan-discovery';
   /*__LAN_DICTIONARIES__*/
   const CREDENTIAL_ERRORS = { API_KEY_REQUIRED: 'error.apiKeyRequired', API_KEY_REJECTED: 'error.apiKeyRejected', API_KEY_INVALID: 'error.apiKeyInvalid', CREDENTIAL_STORE_UNAVAILABLE: 'error.credentialStoreUnavailable', CREDENTIAL_STORE_FAILED: 'error.credentialStoreFailed' };
+  const AVAILABILITY_ERRORS = { SERVICE_UNAVAILABLE: 'status.serviceUnavailable', HOST_UNAVAILABLE: 'status.hostUnavailable' };
   const HOST_ERRORS = {
     'Configure trustFile before connecting. Discovery does not grant trust.': 'error.trustRequired',
     'Configure trustFile before changing a provider.': 'error.configureProvider',
@@ -32,6 +33,7 @@ window.__ModuleLoader__.load({ id: 'dsh-lan-discovery', factory: require => {
     'Enter a valid API key (1–4096 visible ASCII characters).': 'error.apiKeyInvalid',
   };
   function errorText(error, t) {
+    if (Object.hasOwn(AVAILABILITY_ERRORS, error?.code)) return t(AVAILABILITY_ERRORS[error.code]);
     if (error?.i18nKey) return t(error.i18nKey, error.params);
     if (Object.hasOwn(CREDENTIAL_ERRORS, error?.code)) return t(CREDENTIAL_ERRORS[error.code]);
     const message = String(error?.message ?? error ?? '');
@@ -42,7 +44,10 @@ window.__ModuleLoader__.load({ id: 'dsh-lan-discovery', factory: require => {
     // Desktop 0.2.1-rc.3 forwards dsh-app Fetch requests to its authenticated
     // Host in the shell's forwardWebRequest; the page never receives the cookie.
     return async (action, body) => {
-      const response = await globalThis.fetch(`api/lan-discovery/${action}`, { method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', headers: body === undefined ? {} : { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+      let response;
+      try { response = await globalThis.fetch(`api/lan-discovery/${action}`, { method: body === undefined ? 'GET' : 'POST', credentials: 'same-origin', headers: body === undefined ? {} : { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }); }
+      catch (error) { if (error instanceof TypeError || error?.name === 'TypeError') throw Object.assign(new Error('Harness Host is temporarily unavailable.'), { code: 'HOST_UNAVAILABLE' }); throw error; }
+      if ([502, 503, 504].includes(response.status)) throw Object.assign(new Error('Harness Host is temporarily unavailable.'), { code: 'HOST_UNAVAILABLE' });
       const contentType = response.headers.get('content-type') ?? '';
       if (!contentType.toLowerCase().startsWith('application/json')) throw Object.assign(new Error(`Harness Host returned non-JSON HTTP ${response.status}.`), { i18nKey: 'error.hostResponse', params: { status: response.status } });
       const value = await response.json(); if (!response.ok) throw Object.assign(new Error(value.error ?? `HTTP ${response.status}`), { code: value.code }); return value;
@@ -53,9 +58,11 @@ window.__ModuleLoader__.load({ id: 'dsh-lan-discovery', factory: require => {
     const [state, setState] = React.useState(null); const [error, setError] = React.useState(''); const [busy, setBusy] = React.useState(''); const [filter, setFilter] = React.useState('all'); const [models, setModels] = React.useState({}); const [message, setMessage] = React.useState(null);
     const [apiKeys, setApiKeys] = React.useState({}); const [editingKeys, setEditingKeys] = React.useState({}); const [rememberKeys, setRememberKeys] = React.useState({});
     const [activeId, setActiveId] = React.useState(null);
+    const [hostUnavailable, setHostUnavailable] = React.useState(false);
+    const controlsDisabled = !!busy || hostUnavailable || !state;
     const canSaveCredentials = state?.credentialStorage?.available === true;
-    const refresh = React.useCallback(async () => { const value = await api('state'); setState(value); }, [api]);
-    React.useEffect(() => { let live = true; const poll = () => api('state').then(value => { if (live) setState(value); }).catch(error => { if (live) setError(previous => previous || error); }); poll(); const timer = setInterval(poll, 2000); return () => { live = false; clearInterval(timer); }; }, [api]);
+    const refresh = React.useCallback(async () => { const value = await api('state'); setState(value); setHostUnavailable(false); }, [api]);
+    React.useEffect(() => { let live = true; const poll = () => api('state').then(value => { if (live) { setState(value); setHostUnavailable(false); setError(previous => previous?.code === 'HOST_UNAVAILABLE' ? '' : previous); } }).catch(error => { if (live) { if (error.code === 'HOST_UNAVAILABLE') setHostUnavailable(true); else setError(previous => previous || error); } }); poll(); const timer = setInterval(poll, 2000); return () => { live = false; clearInterval(timer); }; }, [api]);
     const clearInput = id => setApiKeys(previous => { const next = { ...previous }; delete next[id]; return next; });
     function selectService(id) {
       setApiKeys({}); setEditingKeys({}); setError(''); setMessage(null);
@@ -72,7 +79,7 @@ window.__ModuleLoader__.load({ id: 'dsh-lan-discovery', factory: require => {
         if (action === 'connect') await finishConnection(result);
         if (action === 'forget-credential') { clearInput(id); setEditingKeys(previous => ({ ...previous, [id]: false })); }
       }
-      catch (error) { setError(error); if (Object.hasOwn(CREDENTIAL_ERRORS, error?.code)) setEditingKeys(previous => ({ ...previous, [id]: true })); } finally { setBusy(''); }
+      catch (error) { setError(error); await refresh().catch(() => {}); if (Object.hasOwn(CREDENTIAL_ERRORS, error?.code)) setEditingKeys(previous => ({ ...previous, [id]: true })); } finally { setBusy(''); }
     }
     async function verifyAndConnect(candidateId, modelId) {
       const apiKey = apiKeys[candidateId] ?? '';
@@ -99,20 +106,23 @@ window.__ModuleLoader__.load({ id: 'dsh-lan-discovery', factory: require => {
       }
     }, [activeId, state, filter]);
     return h('div', { className: 'lan-page' }, h('style', null, css),
-      h('div', { className: 'lan-head' }, h('div', null, h('h1', null, t('title')), h('p', { className: 'lan-muted' }, t('subtitle'))), h('span', { className: 'lan-badge' }, state === null ? t('status.connecting') : state.running ? t('status.discovering') : t('status.stopped'))),
-      h('div', { className: 'lan-toolbar' }, h('button', { onClick: () => act(state?.running ? 'stop' : 'start'), disabled: !!busy }, state?.running ? t('action.stop') : t('action.start')), h('select', { value: filter, onChange: event => setFilter(event.target.value), 'aria-label': t('filter.label') }, h('option', { value: 'all' }, t('filter.all')), h('option', { value: 'image' }, t('filter.image')), h('option', { value: 'tools' }, t('filter.tools'))), h('button', { onClick: () => act('disconnect'), disabled: !!busy || (!state?.connections?.length && !state?.recovery?.pending) }, t('action.disconnect'))),
-      (error || state?.error) && h('p', { className: 'lan-error', role: 'alert' }, errorText(error || state.error, t)), message && h('p', { role: 'status' }, t(message.key, message.params)),
+      h('div', { className: 'lan-head' }, h('div', null, h('h1', null, t('title')), h('p', { className: 'lan-muted' }, t('subtitle'))), h('span', { className: 'lan-badge' }, hostUnavailable ? t('status.connecting') : state === null ? t('status.connecting') : state.discoveryStatus === 'waiting' ? t('status.waiting') : state.discoveryStatus === 'error' ? t('status.discoveryError') : state.running ? t('status.discovering') : t('status.stopped'))),
+      h('div', { className: 'lan-toolbar' }, h('button', { onClick: () => act(state?.running ? 'stop' : 'start'), disabled: controlsDisabled }, state?.running ? t('action.stop') : t('action.start')), h('select', { value: filter, onChange: event => setFilter(event.target.value), 'aria-label': t('filter.label') }, h('option', { value: 'all' }, t('filter.all')), h('option', { value: 'image' }, t('filter.image')), h('option', { value: 'tools' }, t('filter.tools'))), h('button', { onClick: () => act('disconnect'), disabled: controlsDisabled || (!state?.connections?.length && !state?.recovery?.pending) }, t('action.disconnect'))),
+      (error || state?.error) && h('p', { className: Object.hasOwn(AVAILABILITY_ERRORS, error?.code) ? 'lan-muted' : 'lan-error', role: Object.hasOwn(AVAILABILITY_ERRORS, error?.code) ? 'status' : 'alert' }, errorText(error || state.error, t)),
+      hostUnavailable && h('p', { className: 'lan-muted', role: 'status' }, t('status.hostUnavailable')),
+      state?.discoveryStatus === 'waiting' && h('p', { className: 'lan-muted', role: 'status' }, t('status.waitingHint')),
+      state?.connections?.some(connection => connection.available === false) && h('p', { className: 'lan-muted', role: 'status' }, t('status.serviceUnavailable')), message && h('p', { role: 'status' }, t(message.key, message.params)),
       state && !state.trustConfigured && h('p', { className: 'lan-error' }, t('trust.required')),
       !candidates.length ? h('div', { className: 'lan-empty' }, h('h2', null, state === null ? t('empty.loading') : filter === 'all' ? t('empty.none') : t('empty.filtered')), h('p', { className: 'lan-muted' }, state === null ? t('empty.host') : t('empty.help'))) :
       h('div', { className: 'lan-list' }, candidates.map(candidate => {
-        const details = candidate.details; const available = details?.models ?? []; const selected = models[candidate.id] ?? available[0]?.id; const model = available.find(value => value.id === selected); const connected = state.connections.some(connection => connection.baseURL === candidate.baseURL); const valid = candidate.validation?.valid;
+        const details = candidate.details; const available = details?.models ?? []; const selected = models[candidate.id] ?? available[0]?.id; const model = available.find(value => value.id === selected); const connected = state.connections.some(connection => connection.baseURL === candidate.baseURL && connection.available !== false); const valid = candidate.validation?.valid;
         const specs = model?.deployment; const title = model?.display_name ?? candidate.instanceName?.replace(/\._llm-api\._tcp\.local\.?$/, '') ?? candidate.id;
         const credential = candidate.credential; const keyRequired = credential?.required ?? candidate.auth !== 'none'; const keyConfigured = credential?.configured === true;
         const credentialError = details?.status === 'error' && Object.hasOwn(CREDENTIAL_ERRORS, details.code);
         const showKeyForm = keyRequired && (!keyConfigured || editingKeys[candidate.id] || (credentialError && editingKeys[candidate.id] !== false));
         const rememberKey = canSaveCredentials && (rememberKeys[candidate.id] ?? true);
         const retainedCredential = credential?.retainedSession === true || credential?.retainedSaved === true;
-        const connectDisabled = !!busy || state?.recovery?.pending || !valid || !state.trustConfigured || (!!model && model.streaming !== 'supported');
+        const connectDisabled = controlsDisabled || state?.recovery?.pending || !valid || !state.trustConfigured || (!!model && model.streaming !== 'supported');
         const expanded = activeId === candidate.id;
         const panelId = `lan-service-${encodeURIComponent(candidate.id)}`;
         const location = details?.nodeLabel ?? candidate.hostname ?? candidate.baseURL;
@@ -123,7 +133,7 @@ window.__ModuleLoader__.load({ id: 'dsh-lan-discovery', factory: require => {
             event.currentTarget.querySelector?.('.lan-service-toggle')?.focus();
           }
         } },
-          h('button', { type: 'button', className: 'lan-service-toggle', 'data-service-id': candidate.id, id: `${panelId}-toggle`, 'aria-expanded': expanded, 'aria-controls': panelId, 'aria-label': t(expanded ? 'service.collapse' : 'service.expand', { service: title }), 'aria-describedby': [location && `${panelId}-location`, specs && `${panelId}-specs`, connected && `${panelId}-connected`, `${panelId}-status`].filter(Boolean).join(' '), disabled: !!busy, onClick: () => selectService(candidate.id) },
+          h('button', { type: 'button', className: 'lan-service-toggle', 'data-service-id': candidate.id, id: `${panelId}-toggle`, 'aria-expanded': expanded, 'aria-controls': panelId, 'aria-label': t(expanded ? 'service.collapse' : 'service.expand', { service: title }), 'aria-describedby': [location && `${panelId}-location`, specs && `${panelId}-specs`, connected && `${panelId}-connected`, `${panelId}-status`].filter(Boolean).join(' '), disabled: controlsDisabled, onClick: () => selectService(candidate.id) },
             h('span', { className: 'lan-service-icon', 'aria-hidden': true }, h('svg', { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5 }, h('rect', { x: 3, y: 4, width: 18, height: 6, rx: 2 }), h('rect', { x: 3, y: 14, width: 18, height: 6, rx: 2 }), h('path', { d: 'M7 7h.01M7 17h.01M11 7h6M11 17h6', strokeLinecap: 'round' }))),
             h('span', { className: 'lan-service-info' },
               h('span', { className: 'lan-service-title' }, title, connected && h('span', { className: 'lan-badge lan-connected', id: `${panelId}-connected` }, t('badge.connected'))),
@@ -136,18 +146,18 @@ window.__ModuleLoader__.load({ id: 'dsh-lan-discovery', factory: require => {
           !model && h('p', { className: 'lan-muted' }, t('service.inspectHint')),
           h('div', { className: 'lan-auth' },
             ((keyRequired && keyConfigured) || retainedCredential) && h('div', { className: 'lan-auth-tools' },
-              keyRequired && keyConfigured && !showKeyForm && h('button', { className: 'lan-link', disabled: !!busy, onClick: () => setEditingKeys(previous => ({ ...previous, [candidate.id]: true })) }, t('auth.change')),
-              (credential.source === 'session' || credential.source === 'saved' || retainedCredential) && h('button', { className: 'lan-link', disabled: !!busy, onClick: () => act('forget-credential', { candidateId: candidate.id }, candidate.id) }, t('auth.clear'))),
+              keyRequired && keyConfigured && !showKeyForm && h('button', { className: 'lan-link', disabled: controlsDisabled, onClick: () => setEditingKeys(previous => ({ ...previous, [candidate.id]: true })) }, t('auth.change')),
+              (credential.source === 'session' || credential.source === 'saved' || retainedCredential) && h('button', { className: 'lan-link', disabled: controlsDisabled, onClick: () => act('forget-credential', { candidateId: candidate.id }, candidate.id) }, t('auth.clear'))),
             showKeyForm && h('form', { className: 'lan-key-form', onSubmit: event => { event.preventDefault(); if (!connectDisabled) return verifyAndConnect(candidate.id, selected); } },
-              h('input', { type: 'password', value: apiKeys[candidate.id] ?? '', placeholder: t('auth.placeholder'), 'aria-label': t('auth.inputLabel', { service: title }), autoComplete: 'off', autoCapitalize: 'none', autoCorrect: 'off', spellCheck: false, maxLength: 4096, disabled: !!busy, onChange: event => { const value = event.target.value; setApiKeys(previous => ({ ...previous, [candidate.id]: value })); } }),
-              canSaveCredentials && h('label', { className: 'lan-key-remember' }, h('input', { type: 'checkbox', checked: rememberKey, disabled: !!busy, onChange: event => { const checked = event.target.checked; setRememberKeys(previous => ({ ...previous, [candidate.id]: checked })); } }), t('auth.remember')),
+              h('input', { type: 'password', value: apiKeys[candidate.id] ?? '', placeholder: t('auth.placeholder'), 'aria-label': t('auth.inputLabel', { service: title }), autoComplete: 'off', autoCapitalize: 'none', autoCorrect: 'off', spellCheck: false, maxLength: 4096, disabled: controlsDisabled, onChange: event => { const value = event.target.value; setApiKeys(previous => ({ ...previous, [candidate.id]: value })); } }),
+              canSaveCredentials && h('label', { className: 'lan-key-remember' }, h('input', { type: 'checkbox', checked: rememberKey, disabled: controlsDisabled, onChange: event => { const checked = event.target.checked; setRememberKeys(previous => ({ ...previous, [candidate.id]: checked })); } }), t('auth.remember')),
               h('p', { className: 'lan-key-note' }, t(rememberKey ? 'auth.savedHint' : 'auth.sessionHint')),
               !canSaveCredentials && h('p', { className: 'lan-key-note' }, t('auth.storageUnavailable')),
               h('button', { className: 'primary', type: 'submit', disabled: connectDisabled || !(apiKeys[candidate.id] ?? '').length }, busy === candidate.id ? t('action.busy') : t('auth.verifyConnect')),
-              keyConfigured && editingKeys[candidate.id] && h('button', { type: 'button', className: 'lan-link', disabled: !!busy, onClick: () => { clearInput(candidate.id); setEditingKeys(previous => ({ ...previous, [candidate.id]: false })); } }, t('auth.cancel')))),
+              keyConfigured && editingKeys[candidate.id] && h('button', { type: 'button', className: 'lan-link', disabled: controlsDisabled, onClick: () => { clearInput(candidate.id); setEditingKeys(previous => ({ ...previous, [candidate.id]: false })); } }, t('auth.cancel')))),
           available.length > 1 && h('select', { 'aria-label': t('service.model'), value: selected, onChange: event => setModels(previous => ({ ...previous, [candidate.id]: event.target.value })) }, available.map(value => h('option', { key: value.id, value: value.id }, [value.display_name ?? value.id, value.deployment?.quantization].filter(Boolean).join(' · ')))),
-          !valid && h('p', { className: 'lan-error' }, candidate.validation?.errors?.length ? errorText(candidate.validation.errors.join('; '), t) : t('service.incompatible')), details?.status === 'error' && h('p', { className: 'lan-error' }, errorText({ code: details.code, message: details.message }, t)), model && model.streaming !== 'supported' && h('p', { className: 'lan-muted' }, t('service.streamingRequired')),
-          h('div', { className: 'lan-actions' }, h('button', { disabled: !!busy || !valid || !state.trustConfigured, onClick: () => act('inspect', { candidateId: candidate.id }, candidate.id) }, busy === candidate.id ? t('action.busy') : t('action.inspect')), !showKeyForm && h('button', { className: 'primary', disabled: connectDisabled, onClick: () => act('connect', { candidateId: candidate.id, modelId: selected }, candidate.id) }, t('action.connect'))),
+          !valid && h('p', { className: 'lan-error' }, candidate.validation?.errors?.length ? errorText(candidate.validation.errors.join('; '), t) : t('service.incompatible')), details?.status === 'unavailable' && h('p', { className: 'lan-muted', role: 'status' }, t('status.serviceUnavailable')), details?.status === 'error' && h('p', { className: 'lan-error' }, errorText({ code: details.code, message: details.message }, t)), model && model.streaming !== 'supported' && h('p', { className: 'lan-muted' }, t('service.streamingRequired')),
+          h('div', { className: 'lan-actions' }, h('button', { disabled: controlsDisabled || !valid || !state.trustConfigured, onClick: () => act('inspect', { candidateId: candidate.id }, candidate.id) }, busy === candidate.id ? t('action.busy') : t('action.inspect')), !showKeyForm && h('button', { className: 'primary', disabled: connectDisabled, onClick: () => act('connect', { candidateId: candidate.id, modelId: selected }, candidate.id) }, t('action.connect'))),
           h('details', null, h('summary', { className: 'lan-muted', style: { marginTop: 16, cursor: 'pointer' } }, t('service.protocol')), h('pre', null, JSON.stringify({ baseURL: candidate.baseURL, addresses: candidate.addresses, profile: candidate.apiProfile, version: candidate.protocolVersion, auth: candidate.auth, draftAuthCompatible: candidate.draftAuthCompatible, expiresAt: candidate.expiresAt, validation: candidate.validation }, null, 2)))));
       })),
       h('details', { className: 'lan-events' }, h('summary', null, t('events.title')), (state?.events ?? []).slice(0, 20).map((event, index) => h('div', { key: index, className: 'lan-event' }, `${event.at} · ${Object.hasOwn(dictionaries.en, `event.${event.type}`) ? t(`event.${event.type}`) : event.type} · ${event.instanceName ?? event.reason ?? ''}`)))

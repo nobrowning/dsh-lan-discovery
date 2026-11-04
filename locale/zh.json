@@ -83,5 +83,10 @@
   "error.apiKeyRejected": "服务拒绝了该 API key，请输入新的 key 后重试。",
   "error.apiKeyInvalid": "请输入有效的 API key：1–4096 个可见 ASCII 字符，不含空格。",
   "error.credentialStoreUnavailable": "Harness 凭据存储暂不可用。可仅在本次运行中使用 key，或稍后重试。",
-  "error.credentialStoreFailed": "无法读取或更新已保存的 API key。请重试，或仅在本次运行中使用 key。"
+  "error.credentialStoreFailed": "无法读取或更新已保存的 API key。请重试，或仅在本次运行中使用 key。",
+  "status.waiting": "等待网络",
+  "status.waitingHint": "所选网络暂不可用，恢复后将自动继续发现。你可以继续使用其他模型。",
+  "status.serviceUnavailable": "局域网服务暂不可用。服务恢复后可重新连接，也可以切换其他模型；已保存的 API key 会保留。",
+  "status.hostUnavailable": "正在重新连接 Harness，连接恢复后可继续操作。",
+  "status.discoveryError": "扫描不可用"
 }

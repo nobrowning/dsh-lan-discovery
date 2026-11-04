@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
 import { request as httpsRequest, Agent } from 'node:https';
 import { checkServerIdentity } from 'node:tls';
+import { isNetworkUnavailable, serviceUnavailable } from './availability.mjs';
 
 export function canonicalBaseURL(value) {
   const url = new URL(value);
@@ -97,13 +98,16 @@ export function createPinnedTransport(binding, { attribution = {}, apiKey, getAp
       const payload = body === undefined ? undefined : JSON.stringify(body);
       if (payload && Buffer.byteLength(payload) > maxBytes) throw new Error('Request exceeds the experiment body limit.');
       const path = `${base.pathname === '/' ? '' : base.pathname}/${relative}`;
+      // Closing while the credential provider is pending must not start a new request.
+      if (disposed) throw serviceUnavailable();
+      signal?.throwIfAborted();
       const response = await new Promise((resolveResponse, reject) => {
         const req = httpsRequest({ protocol: 'https:', hostname: base.hostname, port: base.port || 443, path, method, agent, servername: isIP(base.hostname) ? undefined : base.hostname,
           lookup(_host, options, callback) { const result = { address, family: isIP(address) }; options?.all ? callback(null, [result]) : callback(null, address, result.family); },
           headers: { ...headers, ...(token === undefined ? {} : { authorization: `Bearer ${token}` }), accept: body?.stream ? 'text/event-stream' : 'application/json', ...(payload ? { 'content-type': 'application/json', 'content-length': Buffer.byteLength(payload) } : {}) }, signal
         }, resolveResponse);
-        req.on('error', error => reject(new Error(error.code === 'ABORT_ERR' ? 'Request cancelled.' : `Service transport failed (${error.code ?? 'TLS_OR_NETWORK'}).`)));
-        req.setTimeout(timeoutMs, () => req.destroy(new Error('Service request timed out.')));
+        req.on('error', error => reject(isNetworkUnavailable(error) ? serviceUnavailable() : new Error(error.code === 'ABORT_ERR' ? 'Request cancelled.' : `Service transport failed (${error.code ?? 'TLS_OR_NETWORK'}).`)));
+        req.setTimeout(timeoutMs, () => req.destroy(Object.assign(new Error('Service request timed out.'), { code: 'ETIMEDOUT' })));
         req.end(payload);
       });
       if (response.statusCode < 200 || response.statusCode >= 300) {

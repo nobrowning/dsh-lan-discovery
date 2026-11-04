@@ -451,3 +451,39 @@ test('a retained saved key can be cleared after the discovered identity changes'
   assert.doesNotMatch(visibleText(page.render()), /API key saved/);
   page.dispose();
 });
+
+test('waiting for network and offline connections use neutral, translated status instead of errors', async () => {
+  const page = await mountedPage({ language: 'zh' });
+  page.states[0].discoveryStatus = 'waiting'; page.states[0].candidates = [];
+  page.states[0].connections = [{ available: false }];
+  const tree = page.render();
+  assert.match(visibleText(tree), /等待网络/); assert.match(visibleText(tree), /恢复后将自动继续发现/);
+  assert.match(visibleText(tree), /服务暂不可用/);
+  assert.equal(elements(tree, node => node.props.role === 'alert').length, 0);
+  assert.equal(button(page, '停止扫描').props.disabled, false);
+  page.states[0].discoveryStatus = 'discovering'; page.states[0].connections = [];
+  assert.doesNotMatch(visibleText(page.render()), /等待网络|服务暂不可用/);
+  page.dispose();
+});
+
+test('a click racing with service withdrawal shows availability status, while trust errors stay errors', async () => {
+  const page = await mountedPage({ language: 'zh', error: { code: 'SERVICE_UNAVAILABLE' } });
+  assert.match(visibleText(page.render()), /暂不可用/);
+  assert.equal(elements(page.render(), node => node.props.role === 'alert').length, 0);
+  page.states[1] = new Error('This exact service endpoint has not been independently authorized.');
+  assert.equal(elements(page.render(), node => node.props.role === 'alert').length, 1);
+  page.dispose();
+});
+
+test('temporary Host outages disable controls and recover automatically without sticky errors', async () => {
+  let offline = true;
+  const page = await mountedPage({ language: 'zh', fetch: async () => { if (offline) return new Response('restarting', { status: 503 }); return json(page.states[0]); } });
+  page.render(); page.startPolling(); await page.poll();
+  assert.match(visibleText(page.render()), /正在重新连接 Harness/);
+  assert.equal(button(page, '停止扫描').props.disabled, true);
+  assert.equal(elements(page.render(), node => node.props.role === 'alert').length, 0);
+  offline = false; await page.poll();
+  assert.doesNotMatch(visibleText(page.render()), /正在重新连接 Harness/);
+  assert.equal(button(page, '停止扫描').props.disabled, false);
+  page.dispose();
+});
