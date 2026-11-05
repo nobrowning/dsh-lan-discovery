@@ -1,6 +1,6 @@
 # Harness integration notes
 
-This document records Desktop behavior verified against DeepSeek Harness 0.2.1-rc.3 and an installed-interface review of 0.2.1-rc.5. Revalidate these interfaces when upgrading Harness. See the [README](../README.md) for installation and the [service contract](service-contract.md) for the server-facing API.
+This document records Desktop behavior verified against DeepSeek Harness 0.2.1-rc.3 and an installed-interface review of 0.2.1-rc.5. Revalidate these interfaces when upgrading Harness. See the [full guide](guide.md) for installation and the [service contract](service-contract.md) for the server-facing API.
 
 ## 0.2.1-rc.5 compatibility review
 

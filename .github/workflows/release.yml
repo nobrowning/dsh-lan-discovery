@@ -83,5 +83,5 @@ jobs:
           elif [ "$existing" = "true" ]; then
             gh release upload "$RELEASE_TAG" dist/*.tgz dist/SHA256SUMS --clobber
           else
-            gh release create "$RELEASE_TAG" dist/*.tgz dist/SHA256SUMS --draft --verify-tag --title "LAN discovery $RELEASE_TAG" --generate-notes --notes "One portable .tgz package for the verified Node targets. Harness integration requires the pinned rc.3/rc.5 Host interfaces; package CI does not qualify a Desktop or Web installation. See README and docs/platform-support.md for platform-specific installation commands, current acceptance evidence, and trust configuration."
+            gh release create "$RELEASE_TAG" dist/*.tgz dist/SHA256SUMS --draft --verify-tag --title "LAN discovery $RELEASE_TAG" --generate-notes --notes "One portable .tgz package for the verified Node targets. Harness integration requires the pinned rc.3/rc.5 Host interfaces; package CI does not qualify a Desktop or Web installation. See README, docs/guide.md and docs/platform-support.md for platform-specific installation commands, current acceptance evidence, and trust configuration."
           fi
